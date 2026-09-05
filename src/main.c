@@ -41,7 +41,7 @@ int main(int argc, char** argv)
 	unsigned char hash2[20];
 	char buffer[65536];
 	size_t size;
-	SHA1_CTX ctx2;
+	struct sha1dc_ctx ctx2;
 	int i,j,foundcollision;
 
 	if (argc < 2)
@@ -52,12 +52,12 @@ int main(int argc, char** argv)
 
 	for (i=1; i < argc; ++i)
 	{
-		SHA1DCInit(&ctx2);
+		sha1dc_init(&ctx2);
 
 		/* if the program name includes the word 'partial' then also test for reduced-round SHA-1 collisions */
 		if (NULL != strstr(argv[0], "partial"))
 		{
-			SHA1DCSetDetectReducedRoundCollision(&ctx2, 1);
+			sha1dc_set_detect_reduced_round_coll(&ctx2, 1);
 		}
 
 		if(!strcmp(argv[i],"-")) {
@@ -74,7 +74,7 @@ int main(int argc, char** argv)
 		while (1)
 		{
 			size=fread(buffer,1,65536,fd);
-			SHA1DCUpdate(&ctx2, buffer, (unsigned)(size));
+			sha1dc_ingest(&ctx2, (unsigned char*)buffer, size);
 			if (size != 65536)
 				break;
 		}
@@ -89,7 +89,7 @@ int main(int argc, char** argv)
 			return 1;
 		}
 
-		foundcollision = SHA1DCFinal(hash2,&ctx2);
+		foundcollision = sha1dc_finish(hash2,&ctx2);
 
 		for (j = 0; j < 20; ++j)
 		{

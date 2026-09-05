@@ -13,15 +13,17 @@
 # 3. If any interfaces have been added since the last public release, then increment age.
 # 4. If any interfaces have been removed or changed since the last public release,
 #    then set age to 0.
-LIBCOMPAT=1:0:0
+# Needs bump
+LIBCOMPAT = 1:0:0
 
-PREFIX ?= /usr/local
-BINDIR=$(PREFIX)/bin
-LIBDIR=$(PREFIX)/lib
-INCLUDEDIR=$(PREFIX)/include/sha1dc
+PREFIX    ?= /usr/local
+BINDIR     = $(PREFIX)/bin
+LIBDIR     = $(PREFIX)/lib
+INCLUDEDIR = $(PREFIX)/include/sha1dc
 
-CC ?= gcc
-LD ?= gcc
+CC     ?= gcc
+LD     ?= gcc
+AR      = gcc-ar
 CC_DEP ?= $(CC)
 
 ifeq ($(shell uname),Darwin)
@@ -33,48 +35,47 @@ INSTALL ?= install
 endif
 
 
-CFLAGS=-O2 -Wall -Werror -Wextra -pedantic -std=c90 -Ilib
-LDFLAGS=
+CFLAGS = -O2 -Wall -Wextra -Wno-parentheses -pedantic -std=c2y -Ilib
+# no LDFLAGS
 
-LT_CC:=$(LIBTOOL) --tag=CC --mode=compile $(CC)
-LT_CC_DEP:=$(CC)
-LT_LD:=$(LIBTOOL) --tag=CC --mode=link $(CC)
-LT_INSTALL:=$(LIBTOOL) --tag=CC --mode=install $(INSTALL)
+LT_CC      = $(LIBTOOL) --tag=CC --mode=compile $(CC)
+LT_CC_DEP  = $(CC)
+LT_LD      = $(LIBTOOL) --tag=CC --mode=link    $(CC)
+LT_INSTALL = $(LIBTOOL) --tag=CC --mode=install $(INSTALL)
 
-MKDIR=mkdir -p
+MKDIR = mkdir -p
 
 ifneq (, $(shell which $(LIBTOOL) 2>/dev/null ))
-CC:=$(LT_CC)
-CC_DEP:=$(LT_CC_DEP)
-LD:=$(LT_LD)
-LDLIB:=$(LT_LD)
-LIB_EXT:=la
+CC         = $(LT_CC)
+CC_DEP     = $(LT_CC_DEP)
+LD         = $(LT_LD)
+LDLIB      = $(LT_LD)
+LIB_EXT    = la
 else
-LIB_EXT:=a
-LD:=$(CC)
-LT_INSTALL:=$(INSTALL)
+LIB_EXT    = a
+LD         = $(CC)
+LT_INSTALL = $(INSTALL)
 endif
 
-CFLAGS+=$(TARGETCFLAGS)
-LDFLAGS+=$(TARGETLDFLAGS)
+CFLAGS  += $(TARGETCFLAGS)
+LDFLAGS += $(TARGETLDFLAGS)
 
 
-LIB_DIR=lib
-LIB_DEP_DIR=dep_lib
-LIB_OBJ_DIR=obj_lib
-SRC_DIR=src
-SRC_DEP_DIR=dep_src
-SRC_OBJ_DIR=obj_src
+LIB_DIR     = lib
+LIB_DEP_DIR = dep_lib
+LIB_OBJ_DIR = obj_lib
+SRC_DIR     = src
+SRC_DEP_DIR = dep_src
+SRC_OBJ_DIR = obj_src
 
-H_DEP:=$(shell find . -type f -name "*.h")
-FS_LIB=$(wildcard $(LIB_DIR)/*.c)
-FS_SRC=$(wildcard $(SRC_DIR)/*.c)
-FS_OBJ_LIB=$(FS_LIB:$(LIB_DIR)/%.c=$(LIB_OBJ_DIR)/%.lo)
-FS_OBJ_SRC=$(FS_SRC:$(SRC_DIR)/%.c=$(SRC_OBJ_DIR)/%.lo)
-FS_OBJ=$(FS_OBJ_SRC) $(FS_OBJ_LIB)
-FS_DEP_LIB=$(FS_LIB:$(LIB_DIR)/%.c=$(LIB_DEP_DIR)/%.d)
-FS_DEP_SRC=$(FS_SRC:$(SRC_DIR)/%.c=$(SRC_DEP_DIR)/%.d)
-FS_DEP=$(FS_DEP_SRC) $(FS_DEP_LIB)
+H_DEP := $(shell find . -type f -name "*.h")
+FS_LIB = $(wildcard $(LIB_DIR)/*.c)
+FS_SRC = $(wildcard $(SRC_DIR)/*.c)
+FS_OBJ_SRC = $(FS_SRC:$(SRC_DIR)/%.c=$(SRC_OBJ_DIR)/%.lo)
+FS_OBJ = $(FS_OBJ_SRC) $(FS_OBJ_LIB)
+FS_DEP_LIB = $(FS_LIB:$(LIB_DIR)/%.c=$(LIB_DEP_DIR)/%.d)
+FS_DEP_SRC = $(FS_SRC:$(SRC_DIR)/%.c=$(SRC_DEP_DIR)/%.d)
+FS_DEP = $(FS_DEP_SRC) $(FS_DEP_LIB)
 
 .SUFFIXES: .c .d
 
@@ -104,7 +105,7 @@ clean:
 	-find . -type f -name '*.la' -print -delete
 	-find . -type f -name '*.lo' -print -delete
 	-find . -type f -name '*.so' -print -delete
-	-find . -type d -name '.libs' -print | xargs rm -rv
+	-find . -type d -name '.libs' -print | xargs -r rm -rv
 	-rm -rf bin
 
 .PHONY: test
@@ -135,11 +136,12 @@ sha1dcsum_partialcoll: bin/sha1dcsum_partialcoll
 .PHONY: library
 library: bin/libsha1detectcoll.$(LIB_EXT)
 
-bin/libsha1detectcoll.la: $(FS_OBJ_LIB)
-	$(MKDIR) $(shell dirname $@) && $(LDLIB) $(LDFLAGS) $(FS_OBJ_LIB) -rpath $(LIBDIR) -version-info $(LIBCOMPAT) -o bin/libsha1detectcoll.la
-	
-bin/libsha1detectcoll.a: $(FS_OBJ_LIB)
-	$(MKDIR) $(shell dirname $@) && $(AR) cru bin/libsha1detectcoll.a $(FS_OBJ_LIB)
+bin/libsha1detectcoll.o: $(FS_LIB)
+	$(MKDIR) $(@D) && $(CC) $(CFLAGS) -r -o $@ $^
+bin/libsha1detectcoll.a: bin/libsha1detectcoll.o
+	$(MKDIR) $(@D) && $(AR) $(ARFLAGS) $@ $<
+bin/libsha1detectcoll.la: bin/libsha1detectcoll.o
+	$(MKDIR) $(@D) && $(LDLIB) $(LDFLAGS) $< -rpath $(LIBDIR) -version-info $(LIBCOMPAT) -o $@
 
 bin/sha1dcsum: $(FS_OBJ_SRC) bin/libsha1detectcoll.$(LIB_EXT)
 	$(LD) $(LDFLAGS) $(FS_OBJ_SRC) -Lbin -lsha1detectcoll -o bin/sha1dcsum
@@ -148,17 +150,23 @@ bin/sha1dcsum_partialcoll: $(FS_OBJ_SRC) bin/libsha1detectcoll.$(LIB_EXT)
 	$(LD) $(LDFLAGS) $(FS_OBJ_SRC) -Lbin -lsha1detectcoll -o bin/sha1dcsum_partialcoll
 
 
-$(SRC_DEP_DIR)/%.d: $(SRC_DIR)/%.c
-	$(MKDIR) $(shell dirname $@) && $(CC_DEP) $(CFLAGS) -M -MF $@ $<
-
-$(SRC_OBJ_DIR)/%.lo ${SRC_OBJ_DIR}/%.o: ${SRC_DIR}/%.c ${SRC_DEP_DIR}/%.d $(H_DEP)
-	$(MKDIR) $(shell dirname $@) && $(CC) $(CFLAGS) -o $@ -c $<
+MAKE.DEP = $(MKDIR) $(@D) && $(CC_DEP) $(CFLAGS) -M -MF $@ $<
+MAKE.OBJ = $(MKDIR) $(@D) && $(CC)     $(CFLAGS) -c -o  $@ $<
 
 
-$(LIB_DEP_DIR)/%.d: $(LIB_DIR)/%.c
-	$(MKDIR) $(shell dirname $@) && $(CC_DEP) $(CFLAGS) -M -MF $@ $<
+$(SRC_DEP_DIR)/%.d:  $(SRC_DIR)/%.c
+	$(MAKE.DEP)
+$(SRC_OBJ_DIR)/%.lo: $(SRC_DIR)/%.c $(SRC_DEP_DIR)/%.d $(H_DEP)
+	$(MAKE.OBJ)
+$(SRC_OBJ_DIR)/%.o:  $(SRC_DIR)/%.c $(SRC_DEP_DIR)/%.d $(H_DEP)
+	$(MAKE.OBJ)
 
-$(LIB_OBJ_DIR)/%.lo $(LIB_OBJ_DIR)/%.o: $(LIB_DIR)/%.c $(LIB_DEP_DIR)/%.d $(H_DEP)
-	$(MKDIR) $(shell dirname $@) && $(CC) $(CFLAGS) -o $@ -c $<
+
+$(LIB_DEP_DIR)/%.d:  $(LIB_DIR)/%.c
+	$(MAKE.DEP)
+$(LIB_OBJ_DIR)/%.lo: $(LIB_DIR)/%.c $(LIB_DEP_DIR)/%.d $(H_DEP)
+	$(MAKE.OBJ)
+$(LIB_OBJ_DIR)/%.o:  $(LIB_DIR)/%.c $(LIB_DEP_DIR)/%.d $(H_DEP)
+	$(MAKE.OBJ)
 
 -include $(FS_DEP)

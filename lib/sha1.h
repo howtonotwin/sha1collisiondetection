@@ -12,99 +12,102 @@
 extern "C" {
 #endif
 
-#ifndef SHA1DC_NO_STANDARD_INCLUDES
 #include <stdint.h>
-#endif
+#include <limits.h>
 
-/* sha-1 compression function that takes an already expanded message, and additionally store intermediate states */
-/* only stores states ii (the state between step ii-1 and step ii) when DOSTORESTATEii is defined in ubc_check.h */
-void sha1_compression_states(uint32_t[5], const uint32_t[16], uint32_t[80], uint32_t[80][5]);
+static_assert(CHAR_BIT == 8);
 
-/*
-// Function type for sha1_recompression_step_T (uint32_t ihvin[5], uint32_t ihvout[5], const uint32_t me2[80], const uint32_t state[5]).
-// Where 0 <= T < 80
-//       me2 is an expanded message (the expansion of an original message block XOR'ed with a disturbance vector's message block difference.)
-//       state is the internal state (a,b,c,d,e) before step T of the SHA-1 compression function while processing the original message block.
-// The function will return:
-//       ihvin: The reconstructed input chaining value.
-//       ihvout: The reconstructed output chaining value.
-*/
-typedef void(*sha1_recompression_type)(uint32_t*, uint32_t*, const uint32_t*, const uint32_t*);
+// The type of SHA-1 expannded message blocks.
+typedef uint32_t sha1_expanded_block_t[80];
+// The type of SHA-1 hashes, the type of the input and output of the SHA-1
+// compressor, and the type of the compressor's intermediate states.
+typedef uint32_t sha1_chaining_value_t[5];
+// A callback for handling collision blocks when they are found.
+typedef void sha1dc_collision_handler_t(
+  void *closure, uint64_t byte_offset
+, const sha1_chaining_value_t in_1, const sha1_chaining_value_t in_2
+, const sha1_expanded_block_t mb_1, const sha1_expanded_block_t mb_2);
 
-/* A callback function type that can be set to be called when a collision block has been found: */
-/* void collision_block_callback(uint64_t byteoffset, const uint32_t ihvin1[5], const uint32_t ihvin2[5], const uint32_t m1[80], const uint32_t m2[80]) */
-typedef void(*collision_block_callback)(uint64_t, const uint32_t*, const uint32_t*, const uint32_t*, const uint32_t*);
+// Various "plain SHA1" functions may be optionally exported, but we do not
+// declare them here.
 
-/* The SHA-1 context. */
-typedef struct {
-	uint64_t total;
+// Overall state needed by the library to do SHA-1 hashing and collision
+// detection for one message stream.
+struct sha1dc_ctx {
+	uint64_t bytes;
 	uint32_t ihv[5];
-	unsigned char buffer[64];
-	int found_collision;
-	int safe_hash;
-	int detect_coll;
-	int ubc_check;
-	int reduced_round_coll;
-	collision_block_callback callback;
+	uint32_t buffer[16];
+	bool found_collision    : 1;
+	bool safe_hash          : 1;
+	bool detect_coll        : 1;
+	bool ubc_check          : 1;
+	bool reduced_round_coll : 1;
 
-	uint32_t ihv1[5];
-	uint32_t ihv2[5];
-	uint32_t m1[80];
-	uint32_t m2[80];
-	uint32_t states[80][5];
-} SHA1_CTX;
+  sha1dc_collision_handler_t *collision;
+  void *collision_closure;
 
-/* Initialize SHA-1 context. */
-void SHA1DCInit(SHA1_CTX*);
+	sha1_chaining_value_t ihv1, ihv2;
+  sha1_expanded_block_t m1, m2;
+  sha1_chaining_value_t states[80];
+};
 
-/*
-    Function to enable safe SHA-1 hashing:
-    Collision attacks are thwarted by hashing a detected near-collision block 3 times.
-    Think of it as extending SHA-1 from 80-steps to 240-steps for such blocks:
-        The best collision attacks against SHA-1 have complexity about 2^60,
-        thus for 240-steps an immediate lower-bound for the best cryptanalytic attacks would be 2^180.
-        An attacker would be better off using a generic birthday search of complexity 2^80.
+// Initialize the context with the default library settings and the hash
+// function state that is appropriate for processing a new message from its
+// beginning.
+void sha1dc_init(struct sha1dc_ctx*);
 
-   Enabling safe SHA-1 hashing will result in the correct SHA-1 hash for messages where no collision attack was detected,
-   but it will result in a different SHA-1 hash for messages where a collision attack was detected.
-   This will automatically invalidate SHA-1 based digital signature forgeries.
-   Enabled by default.
-*/
-void SHA1DCSetSafeHash(SHA1_CTX*, int);
+// Set whether SHA-1 collisions should be handled silently, without an error.
+// This modifies the hash function, so it is no longer SHA-1, but instead a new
+// function, "safe SHA-1". One key property of "safe SHA-1" is that it has the
+// same value as SHA-1 on almost all inputs, except on those inputs that it
+// detects as malicious. The chance of a non-malicious input block being
+// mistaken for malicious is ~2^-90.
+//
+// The other key property of "safe SHA-1" is that it's harder for attackers to
+// find collisions in. When a SHA-1 collision is detected, the near-collision
+// block is hashed 3 times. Effectively, SHA-1 is extended from 80 steps to 240
+// steps for such blocks. The best collision attacks against SHA-1 have
+// complexity about 2^60, so for 240 steps an immediate lower-bound for the best
+// cryptanalytic attacks would be 2^180. An attacker would be better off using a
+// generic birthday search of complexity 2^80.
+//
+// Enabled by default. The default can also be changed at compile time by
+// setting `SHA1DC_INIT_SAFE_HASH_DEFAULT`. Even if set, there is no effect
+// unless `sha1dc_set_detect_coll` is also enabled.
+void sha1dc_set_safe(struct sha1dc_ctx*, bool);
 
-/*
-    Function to disable or enable the use of Unavoidable Bitconditions (provides a significant speed up).
-    Enabled by default
- */
-void SHA1DCSetUseUBC(SHA1_CTX*, int);
+// Set whether "unavoidable bit conditions" should be used to reduce the amount
+// of work done. This provides a large speedup. Enabled by default.
+void sha1dc_set_use_ubc(struct sha1dc_ctx*, bool);
 
-/*
-    Function to disable or enable the use of Collision Detection.
-    Enabled by default.
- */
-void SHA1DCSetUseDetectColl(SHA1_CTX*, int);
+// Set whether collisions should be detected at all. Enabled by default.
+void sha1dc_set_detect_coll(struct sha1dc_ctx*, bool);
 
-/* function to disable or enable the detection of reduced-round SHA-1 collisions */
-/* disabled by default */
-void SHA1DCSetDetectReducedRoundCollision(SHA1_CTX*, int);
+// Set whether collisions against a modified SHA-1 with fewer rounds should also
+// be detected. It is easier to construct collisions for such a reduced
+// function, so this option is useful for testing. Disabled by default.
+void sha1dc_set_detect_reduced_round_coll(struct sha1dc_ctx*, bool);
 
-/* function to set a callback function, pass NULL to disable */
-/* by default no callback set */
-void SHA1DCSetCallback(SHA1_CTX*, collision_block_callback);
+// Set a handler for detected collisions, or `nullptr` to not call any handler.
+// Set to `nullptr` by default.
+void sha1dc_set_callback(
+  struct sha1dc_ctx*, sha1dc_collision_handler_t*, void*);
 
-/* update SHA-1 context with buffer contents */
-void SHA1DCUpdate(SHA1_CTX*, const char*, size_t);
+// Add some message data to the hash.
+void sha1dc_ingest(
+  struct sha1dc_ctx *restrict
+, const unsigned char*, size_t n);
 
-/* obtain SHA-1 hash from SHA-1 context */
-/* returns: 0 = no collision detected, otherwise = collision found => warn user for active attack */
-int  SHA1DCFinal(unsigned char[20], SHA1_CTX*);
+// Terminate a hash computation and get a 160-bit hash value. This involves
+// computing the appropriate padding and feeding it to the hash, so the state
+// needs to be reinitialized if it is to be reused.
+//
+// Returns whether a collision was detected.
+bool sha1dc_finish(
+  unsigned char[static restrict 20], struct sha1dc_ctx *restrict);
 
 #if defined(__cplusplus)
 }
-#endif
-
-#ifdef SHA1DC_CUSTOM_TRAILING_INCLUDE_SHA1_H
-#include SHA1DC_CUSTOM_TRAILING_INCLUDE_SHA1_H
 #endif
 
 #endif
