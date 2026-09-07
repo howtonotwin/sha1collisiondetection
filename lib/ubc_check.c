@@ -73,6 +73,9 @@
 // This is actually *faster* than the one from 2017 already. Unrolling! But e.g.
 // MSVC is obstinate and won't unroll this, because it can't see it gets faster,
 // so generating unrolled source code is still a good next step.
+//
+// Also, it appears to have much worse variance in runtime, presumably because
+// the low probability UBCs after the early return are not grouped by DV.
 void sha1dc_ubc_check_baseline(
   uint32_t const W[static restrict 80]
 , uint8_t        dvmask[static restrict sha1dc_dvmask_bytes()]) {
