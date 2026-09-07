@@ -33,7 +33,8 @@ sha1dc_n_disturbance_vectors [[gnu::visibility("protected")]];
 // of DVs that might have been used to construct a given input. The bits of the
 // dvmask correspond to the `sha1dc_disturbance_vectors`, in little-endian order
 // (`mask[0] & 1` is associated to `sha1dc_disturbance_vectors[0]`, etc.).
-inline size_t sha1dc_dvmask_bytes() [[unsequenced]] {
+inline size_t sha1dc_dvmask_bytes [[gnu::visibility("protected")]]()
+[[unsequenced]] {
   return sha1dc_n_disturbance_vectors + 7 >> 3;
 }
 // Are any DVs specified in the mask? (This is a convenience/optimization; one

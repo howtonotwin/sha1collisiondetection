@@ -353,6 +353,7 @@ void sha1dc_ubc_check
 }
 #endif
 
+extern inline size_t sha1dc_dvmask_bytes();
 bool sha1dc_check_dvmask(
   const uint8_t dvmask[static restrict sha1dc_dvmask_bytes()]) {
   uint32_t buf;
