@@ -129,25 +129,18 @@ typedef uint8_t  [[gnu::vector_size(64)]] v64u8;
       "%[" # src1  "], "                                  \
       "%[" # src2  "]"                                    \
     "}"
-// The AVX-512 intrinsics don't have a surefire way of expressing the special
-// behavior of the masked instructions with memory operands of totally avoiding
-// (the appearance of) touching the masked out memory regions. (The masked load
-// intrinsics are exceptional in that they can express this, but then GCC
-// doesn't turn the explicit masked loads back into memory operands. GCC also
-// has several other shortcomings with optimizing the intrinsics.)
-// So: explicit assembly!
-// "OR mask vector of 16 uint32_t memory"
+// GCC doesn't seem to understand that it can make the dst and src1 operands of
+// an AVX-512 instruction generated from an intrinisic the same. This causes it
+// to sprinkle useless movs to copy src1 into dst (even though the remaining
+// copy of the old value is never used again). But it does understand how to get
+// things right for an inline asm statement. Go figure.
+// "OR mask vector 16 uint32_t memory"
 static inline v16u32 or_mv16u32_mem [[gnu::always_inline, gnu::artificial]](
-  v16u32 dst, __mmask16 k, v16u32 src1, uint32_t const *src2) {
-  const v16u32 [[gnu::aligned(alignof *src2)]] *p = (void const*)src2;
-  // trust the user
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Warray-bounds"
+  v16u32 dst, __mmask16 k, v16u32 src1, v16u32 const *src2) {
   __asm__(
-    "vpord" AVX512_ARGS3K(dst, k, src1, p)
+    "vpord" AVX512_ARGS3K(dst, k, src1, src2)
   : [dst]"+v"(dst)
-  : [k]"Yk"(k), [src1]"v"(src1), [p]"m"(*p));
-#pragma GCC diagnostic pop
+  : [k]"Yk"(k), [src1]"v"(src1), [src2]"m"(*src2));
   return dst;
 }
 
@@ -163,7 +156,7 @@ void sha1dc_ubc_check_avx512(
   // (The type is currently uint32_t and this code is NOT generic over it (e.g.
   // the intrinsic functions have the width in their names), but it is heavily
   // typed to hopefully make it clear what choices depend on what.)
-  typedef typeof_unqual(*sha1dc_avx512_dvmasks) dvmask_t;
+  typedef typeof_unqual(sha1dc_avx512_v64ubc_dvmasks[0][0][0]) dvmask_t;
   // Accumulator(s) (under OR) for the dvmasks of UBCs that fail.
   //
   // Each incoming mask will go to one of the lanes essentially arbitrarily, so
@@ -216,11 +209,8 @@ void sha1dc_ubc_check_avx512(
   static_assert(n_v64ubcs == countof sha1dc_avx512_v64ubc_ms);
   static_assert(n_v64ubcs == countof sha1dc_avx512_v64ubc_ns);
   static_assert(n_v64ubcs == countof sha1dc_avx512_v64ubc_cs);
-  static_assert(
-      64 * n_v64ubcs
-    >= // XXX: padding UBCs need not have dvmasks!
-      countof sha1dc_avx512_dvmasks);
-  static_assert(countof sha1dc_ubcs == countof sha1dc_avx512_dvmasks);
+  static_assert(n_v64ubcs == countof sha1dc_avx512_v64ubc_dvmasks);
+  static_assert(accumulation_chunks == countof *sha1dc_avx512_v64ubc_dvmasks);
 #if UNROLLING_LOOPS
 #pragma GCC unroll 999
 #endif
@@ -247,12 +237,8 @@ void sha1dc_ubc_check_avx512(
 #endif
     for(size_t j = 0; j < accumulation_chunks; j++) {
 #if UNROLLING_LOOPS
-      // Not necessary for correctness, just cuts off the unrolling. (Actually,
-      // forming the out-of-bounds pointer below is instant UB in ISO C, though
-      // GCC (and really any "normal" x86 compiler) will not treat it as such,
-      // since the architecture doesn't treat pointers very specially.)
-      if(64 * i + impossible_dvmasks * j >= countof sha1dc_avx512_dvmasks)
-        break;
+      // Not necessary for correctness, just cuts out useless work.
+      if(64 * i + impossible_dvmasks * j >= countof sha1dc_ubcs) break;
 
       // Make the alternating accumulator transparent to the loop body.
 # undef  IMPOSSIBLE
@@ -261,15 +247,13 @@ void sha1dc_ubc_check_avx512(
         // We skipped zeroing IMPOSSIBLE above, because we can replace the first
         // merge-masking OR with a zeroing-masking load.
         IMPOSSIBLE = (typeof(IMPOSSIBLE))_mm512_maskz_load_epi32(
-          ne
-        , &sha1dc_avx512_dvmasks[64 * i + impossible_dvmasks * j]);
+          ne, &sha1dc_avx512_v64ubc_dvmasks[i][j]);
       else
 #else
       if(true)
 #endif
         IMPOSSIBLE = or_mv16u32_mem(
-          IMPOSSIBLE, ne, IMPOSSIBLE
-        , &sha1dc_avx512_dvmasks[64 * i + impossible_dvmasks * j]);
+          IMPOSSIBLE, ne, IMPOSSIBLE, &sha1dc_avx512_v64ubc_dvmasks[i][j]);
       ne >>= impossible_dvmasks;
     }
   }
@@ -280,7 +264,7 @@ void sha1dc_ubc_check_avx512(
   IMPOSSIBLE = impossible0 | impossible1;
 #endif
 #if !__OPTIMIZE__
-  // This line ends in the instructions
+  // GCC ends this line in the instructions
   //     vpord       xmmA, xmmB, xmmA             # fold up the pairs of u32
   //     vpternlogd  xmmA, xmmA, xmmA, 0b01010101 # "xmmA = !xmmA"
   // This is rather silly, since those could be the one instruction
