@@ -16,6 +16,14 @@
   // This is just a best guess
 # define UNROLLING_LOOPS __GNUC__ && __OPTIMIZE__ && !__OPTIMIZE_SIZE__
 #endif
+// see use, below
+#ifndef PARALLEL_ACCUMULATORS
+# if UNROLLING_LOOPS
+#   define PARALLEL_ACCUMULATORS 2
+# else
+#   define PARALLEL_ACCUMULATORS 1
+# endif
+#endif
 #define USED_AVX512_FEATURES(X) \
   X("avx512f")    \
   X("avx512bw")   \
@@ -166,40 +174,38 @@ void sha1dc_ubc_check_avx512(
   // only `reg = ~reg & mem`). There is, of course, one for `reg |= mem`. (The
   // alternative is to remove the `~` in `reg &= ~mem` by inverting the dvmask
   // tables statically, but that'd be ugly.)
-  dvmask_t [[gnu::vector_size(64)]]
-#if UNROLLING_LOOPS
-  // Creating one long dependency chain on one accumulator makes the latency of
-  // this whole function a bit higher than it needs to be. We can instead
-  // alternate between two accumulators and join them up at the end. This takes
-  // advantage of the fact that most (all?) processors with AVX-512 can do two
-  // 512-bit ORs at the same time. In exchange, we need one more OR to join the
-  // accumulators at reduction.
-  //
-  // All this is only going to be profitable if alternating between accumulators
-  // does not involve adding conditional instructions. For this code, that means
-  // the loops need to be unrolled.
-  //
-  // NB: Empirically, doing this appears to have a tiny worsening effect on
-  //     throughput (cycles/call or MB/s), <0.5 cycles/call (out of 20-30).
-  //     Theoretically (according to llvm-mca, for this author's particular
-  //     core), if there were no external interference, there should be no
-  //     difference in throughput.
-  impossible0, impossible1
-  // When unrolling, we can also avoid zeroing. See use below.
-
-  // This is for (static) calculations before we have the loop counter for
-  // selecting the accumulator.
-# define IMPOSSIBLE impossible0
-#else
-  impossible = {}
-# define IMPOSSIBLE impossible
+  dvmask_t [[gnu::vector_size(64)]] impossible[
+    // Creating one long dependency chain on one accumulator makes the latency
+    // of this whole function a bit higher than it needs to be. We can instead
+    // alternate between two accumulators and join them up at the end. This
+    // takes advantage of the fact that most (all?) processors with AVX-512 can
+    // do two 512-bit ORs at the same time. In exchange, we need one more OR to
+    // join the accumulators at reduction.
+    //
+    // All this is only going to be profitable if alternating between
+    // accumulators does not involve adding conditional instructions. For this
+    // code, that means the loops need to be unrolled. (Hence the defaults at
+    // the top of the file).
+    //
+    // NB: In a microbenchmark testing just ubc_check, doing this appears to
+    //     have a tiny worsening effect on throughput, <0.5 cycles/call (out of
+    //     20-30). Theoretically (according to llvm-mca, for this author's
+    //     particular core), if there were no external interference, there
+    //     should be no difference in throughput. In context,
+    //     PARALLEL_ACCUMULATORS=2 produces a slightly faster (~1-3%, in MB/s)
+    //     sha1dcsum. The next few values up have no clear effect.
+    PARALLEL_ACCUMULATORS]
+#if !UNROLLING_LOOPS
+      = {}
 #endif
+  // When unrolling, we can also avoid zeroing. See use below.
   ;
+
   // The accumulator register is not nearly big enough to hold 64 dvmasks for 64
   // UBCs. Its actual width, in units of dvmask_t, is
   constexpr static size_t impossible_dvmasks =
     // countof IMPOSSIBLE; // not supported
-    sizeof IMPOSSIBLE / sizeof IMPOSSIBLE[0];
+    sizeof *impossible / sizeof (*impossible)[0];
   // Once we evaluate 64 UBCs and have a "vector" (a mask) of 64 results, it'll
   // need to be broken up into this many chunks:
   constexpr static size_t accumulation_chunks = 64 / impossible_dvmasks;
@@ -236,14 +242,13 @@ void sha1dc_ubc_check_avx512(
 #pragma GCC unroll 999
 #endif
     for(size_t j = 0; j < accumulation_chunks; j++) {
+      // Abbreviation for the alternating accumulator
+#define IMPOSSIBLE \
+    impossible[(accumulation_chunks * i + j) % PARALLEL_ACCUMULATORS]
 #if UNROLLING_LOOPS
       // Not necessary for correctness, just cuts out useless work.
       if(64 * i + impossible_dvmasks * j >= countof sha1dc_ubcs) break;
-
-      // Make the alternating accumulator transparent to the loop body.
-# undef  IMPOSSIBLE
-# define IMPOSSIBLE 0[j % 2 == 0 ? &impossible0 : &impossible1]
-      if(!i && j < 2)
+      if(accumulation_chunks * i + j < PARALLEL_ACCUMULATORS)
         // We skipped zeroing IMPOSSIBLE above, because we can replace the first
         // merge-masking OR with a zeroing-masking load.
         IMPOSSIBLE = (typeof(IMPOSSIBLE))_mm512_maskz_load_epi32(
@@ -255,14 +260,12 @@ void sha1dc_ubc_check_avx512(
         IMPOSSIBLE = or_mv16u32_mem(
           IMPOSSIBLE, ne, IMPOSSIBLE, &sha1dc_avx512_v64ubc_dvmasks[i][j]);
       ne >>= impossible_dvmasks;
+#undef  IMPOSSIBLE
     }
   }
 
-#if UNROLLING_LOOPS
-# undef  IMPOSSIBLE
-# define IMPOSSIBLE impossible0
-  IMPOSSIBLE = impossible0 | impossible1;
-#endif
+  for(size_t i = 1; i < PARALLEL_ACCUMULATORS; i++)
+    *impossible |= impossible[i];
 #if !__OPTIMIZE__
   // GCC ends this line in the instructions
   //     vpord       xmmA, xmmB, xmmA             # fold up the pairs of u32
@@ -270,13 +273,13 @@ void sha1dc_ubc_check_avx512(
   // This is rather silly, since those could be the one instruction
   //     vpternlogd  xmmA, xmmA, xmmB, 0b00010001 # "xmmA = ~(xmmA | xmmB)"
   // There's also a pointless mov somewhere in there...
-  dvmask_t possible = ~_mm512_reduce_or_epi32((__m512i)IMPOSSIBLE);
+  dvmask_t possible = ~_mm512_reduce_or_epi32((__m512i)*impossible);
 #else
   // If you want something done right, do it yourself!
   // (Maybe one day this block can be removed.)
   dvmask_t [[gnu::vector_size(32)]] half = (typeof(half))_mm256_or_epi32(
-    _mm512_extracti32x8_epi32((__m512i)IMPOSSIBLE, 0)
-  , _mm512_extracti32x8_epi32((__m512i)IMPOSSIBLE, 1));
+    _mm512_extracti32x8_epi32((__m512i)*impossible, 0)
+  , _mm512_extracti32x8_epi32((__m512i)*impossible, 1));
   dvmask_t [[gnu::vector_size(16)]] quarter = (typeof(quarter))_mm_or_epi32(
     _mm256_extracti32x4_epi32((__m256i)half, 0)
   , _mm256_extracti32x4_epi32((__m256i)half, 1));
