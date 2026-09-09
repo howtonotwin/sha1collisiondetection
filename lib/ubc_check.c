@@ -45,6 +45,36 @@
 #include "ubc_check.h"
 
 // Consuming the output of parse_bitrel (and renaming things)
+typedef bool bit;
+#if ENABLE_AVX512
+  // Setting up vector types ("vNuM").
+  // Note: <immintrin.h> __mmNNNi types can be read from objects of any type, but
+  //       not the other way around (just like standard C char).
+# define U(M) uint ## M ## _t
+# if __GNUC__
+#   define V(N, M) U(M) __attribute__((vector_size(N * sizeof(U(M)))))
+typedef V(64,  8) v64u8;
+typedef V(16, 32) v16u32;
+#   undef V
+#   undef U
+# elif __STDC_VERSION__ >= 202311L
+    // C23 alignas is a bit of an outlier in that it is not a property of types
+    // but of declarations (hence the need for "vNuM" to be a macro).
+#   define V(N, M) alignas(N * sizeof(U(M))) U(M)[N]
+#   define v64u8  V(64,  8)
+#   define v16u32 V(16, 32)
+# else
+    // TODO: MSVC.
+
+    // The following works because C allows some braces to be left out of
+    // initializers, but it causes most compilers to emit a warning.
+#   define V(N, M, W) union { U(M) scalar[N]; __mm ## W ## i vector; }
+typedef V(64,  8, 512) v64u8;
+typedef V(16, 32, 512) v16u32;
+#   undef V
+#   undef U
+# endif
+#endif
 #define sha1dc_disturbance_vector_dv_class     class
 #define sha1dc_disturbance_vector_k            k
 #define sha1dc_disturbance_vector_b            b

@@ -1,11 +1,17 @@
 // This code was generated programmatically.
 // See github.com/cr-marcstevens/sha1collisiondetection-tools
 // or  github.com/howtonotwin/sha1collisiondetection-tools.
+#if __STDC_VERSION__ >= 202311L
+enum sha1dc_disturbance_vector_class : unsigned char {
+  sha1dc_disturbance_vector_class_I = 1,
+  sha1dc_disturbance_vector_class_II
+};
+# define ENUM_DV_CLASS enum sha1dc_disturbance_vector_class
+#else
+# define ENUM_DV_CLASS unsigned char
+#endif
 const struct sha1dc_disturbance_vector {
-  enum sha1dc_disturbance_vector_class : unsigned char {
-    sha1dc_disturbance_vector_class_I = 1,
-    sha1dc_disturbance_vector_class_II
-  }             sha1dc_disturbance_vector_dv_class;
+  ENUM_DV_CLASS sha1dc_disturbance_vector_dv_class;
   unsigned char sha1dc_disturbance_vector_k;
   unsigned char sha1dc_disturbance_vector_b;
   unsigned char sha1dc_disturbance_vector_test_t;
@@ -43,8 +49,11 @@ const struct sha1dc_disturbance_vector {
   {sha1dc_disturbance_vector_class_II, 54,  0, 65, {0x0400001c, 0xcc000014, 0x0c000002, 0xc0000010, 0xb400001c, 0x3c000004, 0xbc00001a, 0x20000010, 0x2400001c, 0xec000014, 0x0c000002, 0xc0000010, 0xb400001c, 0x2c000004, 0xbc000018, 0xb0000010, 0x0000000c, 0xb8000010, 0x08000018, 0x78000010, 0x08000014, 0x70000010, 0xb800001c, 0xe8000000, 0xb0000004, 0x58000010, 0xb000000c, 0x48000000, 0xb0000000, 0xb8000010, 0x98000010, 0xa0000000, 0x00000000, 0x00000000, 0x20000000, 0x80000000, 0x00000010, 0x00000000, 0x20000010, 0x20000000, 0x00000010, 0x60000000, 0x00000018, 0xe0000000, 0x90000000, 0x30000010, 0xb0000000, 0x20000000, 0x20000000, 0xa0000000, 0x00000010, 0x80000000, 0x20000000, 0x20000000, 0x20000000, 0x80000000, 0x00000010, 0x00000000, 0x20000010, 0xa0000000, 0x00000000, 0x20000000, 0x20000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000020, 0x00000001, 0x40000002, 0x40000041, 0x40000022, 0x80000005, 0xc0000082, 0xc0000046, 0x4000004b, 0x80000107}},
   {sha1dc_disturbance_vector_class_II, 55,  0, 65, {0x00000010, 0x0400001c, 0xcc000014, 0x0c000002, 0xc0000010, 0xb400001c, 0x3c000004, 0xbc00001a, 0x20000010, 0x2400001c, 0xec000014, 0x0c000002, 0xc0000010, 0xb400001c, 0x2c000004, 0xbc000018, 0xb0000010, 0x0000000c, 0xb8000010, 0x08000018, 0x78000010, 0x08000014, 0x70000010, 0xb800001c, 0xe8000000, 0xb0000004, 0x58000010, 0xb000000c, 0x48000000, 0xb0000000, 0xb8000010, 0x98000010, 0xa0000000, 0x00000000, 0x00000000, 0x20000000, 0x80000000, 0x00000010, 0x00000000, 0x20000010, 0x20000000, 0x00000010, 0x60000000, 0x00000018, 0xe0000000, 0x90000000, 0x30000010, 0xb0000000, 0x20000000, 0x20000000, 0xa0000000, 0x00000010, 0x80000000, 0x20000000, 0x20000000, 0x20000000, 0x80000000, 0x00000010, 0x00000000, 0x20000010, 0xa0000000, 0x00000000, 0x20000000, 0x20000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000020, 0x00000001, 0x40000002, 0x40000041, 0x40000022, 0x80000005, 0xc0000082, 0xc0000046, 0x4000004b}},
   {sha1dc_disturbance_vector_class_II, 56,  0, 65, {0x2600001a, 0x00000010, 0x0400001c, 0xcc000014, 0x0c000002, 0xc0000010, 0xb400001c, 0x3c000004, 0xbc00001a, 0x20000010, 0x2400001c, 0xec000014, 0x0c000002, 0xc0000010, 0xb400001c, 0x2c000004, 0xbc000018, 0xb0000010, 0x0000000c, 0xb8000010, 0x08000018, 0x78000010, 0x08000014, 0x70000010, 0xb800001c, 0xe8000000, 0xb0000004, 0x58000010, 0xb000000c, 0x48000000, 0xb0000000, 0xb8000010, 0x98000010, 0xa0000000, 0x00000000, 0x00000000, 0x20000000, 0x80000000, 0x00000010, 0x00000000, 0x20000010, 0x20000000, 0x00000010, 0x60000000, 0x00000018, 0xe0000000, 0x90000000, 0x30000010, 0xb0000000, 0x20000000, 0x20000000, 0xa0000000, 0x00000010, 0x80000000, 0x20000000, 0x20000000, 0x20000000, 0x80000000, 0x00000010, 0x00000000, 0x20000010, 0xa0000000, 0x00000000, 0x20000000, 0x20000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000020, 0x00000001, 0x40000002, 0x40000041, 0x40000022, 0x80000005, 0xc0000082, 0xc0000046}}};
-const size_t sha1dc_n_disturbance_vectors =
-  countof sha1dc_disturbance_vectors;
+#undef ENUM_DV_CLASS
+const size_t sha1dc_n_disturbance_vectors = 32;
+#if __STDC_VERSION__ >= 202311L
+static_assert(32 == _Countof sha1dc_disturbance_vectors);
+#endif
 const size_t      sha1dc_n_needed_states = 2;
 const signed char sha1dc_need_state[81]  = {
   -1, -1, -1, -1, -1, -1, -1, -1,
@@ -61,7 +70,7 @@ const signed char sha1dc_need_state[81]  = {
 static const struct sha1dc_ubc {
   unsigned char sha1dc_ubc_a, sha1dc_ubc_b,
                 sha1dc_ubc_i, sha1dc_ubc_j : 7;
-  bool          sha1dc_ubc_c : 1;
+  bit           sha1dc_ubc_c : 1;
   uint8_t       sha1dc_ubc_dvmask[4];
 } sha1dc_ubcs[] = {
   {44, 45, 29, 29, 0, {0x80, 0xa0, 0x83, 0x02}},
@@ -220,9 +229,9 @@ static const struct sha1dc_ubc {
   {36, 40,  3, 28, 0, {0x00, 0x00, 0x10, 0x00}},
   {40, 44,  4, 29, 0, {0x00, 0x00, 0x00, 0x08}},
   {37, 38,  4,  4, 1, {0x00, 0x20, 0x00, 0x00}}};
-constexpr size_t sha1dc_avx512_bias = 35;
-static const uint8_t [[gnu::vector_size(64)]]
-sha1dc_avx512_v64ubc_as[] = {
+#if ENABLE_AVX512
+static const size_t sha1dc_avx512_bias = 35;
+static const v64u8 sha1dc_avx512_v64ubc_as[] = {
   {  39,  32,  36,  55,  48,   4,  47,  16,
      20,  24,  23,  51,  59,  40,  36,  43,
      40,  44,  24,  28,   0,  16,  20,  20,
@@ -323,11 +332,15 @@ sha1dc_avx512_v64ubc_ns[] = {
                                                                   
                                                                   }};
 static const uint64_t sha1dc_avx512_v64ubc_cs[] = {
+#if __STDC_VERSION__ >= 202311L
   0b0101011000110101010010010001000000100000000100000000001110100000,
   0b1100111000000101010111110000010110010000000110111011011000011000,
-                                      0b1001010010001110100001011000};
-static const uint32_t [[gnu::vector_size(64)]]
-sha1dc_avx512_v64ubc_dvmasks[][4] = {
+                                      0b1001010010001110100001011000
+#else
+  0x56354910201003a0, 0xce055f05901bb618, 0x948e858
+#endif
+ };
+static const v16u32 sha1dc_avx512_v64ubc_dvmasks[][4] = {
   {{0x0283a080, 0x08080225, 0x1010088a, 0x60a08004,
     0x82012220, 0x00041040, 0x18180801, 0x00401010,
     0x01004040, 0x04040100, 0x800a00a2, 0x30302002,
@@ -371,3 +384,4 @@ sha1dc_avx512_v64ubc_dvmasks[][4] = {
     0x00000800, 0x00100000, 0x08000000, 0x00002000,
                                                   }
    /* padding suppressed */}};
+#endif
