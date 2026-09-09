@@ -11,6 +11,7 @@
 #endif
 
 #include <stddef.h>
+#include <stdint.h>
 
 // Description of a class of attacks against SHA-1.
 struct sha1dc_disturbance_vector {
