@@ -34,17 +34,22 @@
 # define SHA1DC_ENDIAN __STDC_ENDIAN_NATIVE__
 #endif
 
-#ifndef SHA1DC_FORCE_ALIGNED_ACCESS
-# ifdef SHA1DC_ON_INTEL_LIKE_PROCESSOR
-#   define SHA1DC_ALLOW_UNALIGNED_ACCESS
-# endif
+#if   defined SHA1DC_ON_INTEL_LIKE_PROCESSOR \
+  && !defined SHA1DC_FORCE_ALIGNED_ACCESS
+# define SHA1DC_ALLOW_UNALIGNED_ACCESS
 #endif
 #ifdef SHA1DC_ALLOW_UNALIGNED_ACCESS
-# define UNALIGN [[gnu::aligned(1)]]
 # define sha1_load8_maybe_unaligned_beu32 sha1_load8_beu32
 #else
-# define UNALIGN
 # define sha1_load8_maybe_unaligned_beu32 sha1_load8_aligned_beu32
+#endif
+#if defined SHA1DC_ALLOW_UNALIGNED_ACCESS && defined __GNUC__
+// This has to be a typedef; we can't just conditionally #define something for
+// the attribute. (Clang and GCC use different attribute appertainment rules.)
+typedef __attribute__((aligned(1))) uint32_t uint32_unaligned;
+#else
+// Don't know how to do unaligned access on non-GCC-alikes.
+typedef                             uint32_t uint32_unaligned;
 #endif
 
 #if __STDC_VERSION_STDBIT_H__ >= 202609L
@@ -160,7 +165,7 @@ DECLARE_PLAIN_SHA1(void sha1_add_block)(
 // handling) and expansion.
 DECLARE_PLAIN_SHA1(void sha1_add_block_expanding)(
   uint32_t               cv[static restrict 5]
-, const uint32_t UNALIGN  m[static restrict 16]) {
+, const uint32_unaligned  m[static restrict 16]) {
   sha1_expanded_block_t W;
   sha1_chaining_value_t state;
   memcpy(state, cv, sizeof state);
@@ -179,9 +184,9 @@ DECLARE_PLAIN_SHA1(void sha1_add_block_expanding)(
 
 // The same as sha1_add_block_expanding, but saving W and some states.
 DECLARE_PLAIN_SHA1(void sha1_add_block_expanding_saving)(
-  uint32_t                   cv[static restrict  5]
-, const uint32_t UNALIGN      m[static restrict 16]
-, uint32_t                    W[static restrict 80]
+  uint32_t               cv[static restrict  5]
+, const uint32_unaligned  m[static restrict 16]
+, uint32_t                W[static restrict 80]
 , sha1_chaining_value_t  states[static restrict sha1dc_n_needed_states]) {
   sha1_chaining_value_t  state;
   memcpy(state, cv, sizeof state);
@@ -386,8 +391,8 @@ void sha1dc_set_callback(
 }
 
 void sha1dc_ingest(
-  size_t n; struct sha1dc_ctx *restrict ctx
-, const unsigned char buf[static restrict n], size_t n) {
+  struct sha1dc_ctx *restrict ctx
+, const unsigned char *buf, size_t n) {
   if(!n) return;
 
   unsigned char held = ctx->bytes % sizeof ctx->buffer;

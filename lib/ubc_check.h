@@ -5,8 +5,9 @@
 ***/
 #ifndef SHA1DC_UBC_CHECK_H
 #define SHA1DC_UBC_CHECK_H
+
 #ifdef __cplusplus
-extern "C" {
+#warning "sha1dc/ubc_check.h is not compatible with C++"
 #endif
 
 #include <stddef.h>
@@ -62,9 +63,5 @@ sha1dc_need_state [[gnu::visibility("protected")]][81];
 void sha1dc_ubc_check [[gnu::access(write_only, 2)]](
   uint32_t const expanded_message[static restrict 80]
 , uint8_t        dvmask[static restrict sha1dc_dvmask_bytes()]) [[unsequenced]];
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif

@@ -8,14 +8,42 @@
 #ifndef SHA1DC_SHA1_H
 #define SHA1DC_SHA1_H
 
-#if defined(__cplusplus)
+#ifdef __cplusplus
 extern "C" {
 #endif
 
 #include <stdint.h>
 #include <limits.h>
 
-static_assert(CHAR_BIT == 8);
+#if defined __GNUC__ && !defined __clang__ && !defined __cplusplus
+# define SHA1DC_FWDPRM_EXTENSION __extension__
+# define SHA1DC_FORWARD_PARAM(p) p;
+# define SHA1DC_FORWARDED(p)     p
+#else
+# define SHA1DC_FWDPRM_EXTENSION
+# define SHA1DC_FORWARD_PARAM(p)
+# define SHA1DC_FORWARDED(p)
+#endif
+
+#if __STDC_VERSION__ >= 199901L
+# define SHA1DC_STATIC_SIZE static
+#else
+# define SHA1DC_STATIC_SIZE
+#endif
+
+#if __STDC_VERSION__ >= 199901L
+# define SHA1DC_RESTRICT restrict
+#elif defined __GNUC__
+# define SHA1DC_RESTRICT __restrict__
+#elif defined _MSC_VER
+# define SHA1DC_RESTRICT __restrict
+#else
+# define SHA1DC_RESTRICT
+#endif
+
+#if CHAR_BIT != 8
+#error "bytes are not 8 bits on this platform; expect breakage!"
+#endif
 
 // The type of SHA-1 expannded message blocks.
 typedef uint32_t sha1_expanded_block_t[80];
@@ -94,9 +122,10 @@ void sha1dc_set_callback(
   struct sha1dc_ctx*, sha1dc_collision_handler_t*, void*);
 
 // Add some message data to the hash.
-void sha1dc_ingest(
-  struct sha1dc_ctx *restrict
-, const unsigned char*, size_t n);
+SHA1DC_FWDPRM_EXTENSION void sha1dc_ingest(
+  SHA1DC_FORWARD_PARAM(size_t n)
+  struct sha1dc_ctx *SHA1DC_RESTRICT
+, const unsigned char[SHA1DC_FORWARDED(SHA1DC_STATIC_SIZE n)], size_t n);
 
 // Terminate a hash computation and get a 160-bit hash value. This involves
 // computing the appropriate padding and feeding it to the hash, so the state
@@ -104,10 +133,16 @@ void sha1dc_ingest(
 //
 // Returns whether a collision was detected.
 bool sha1dc_finish(
-  unsigned char[static restrict 20], struct sha1dc_ctx *restrict);
+  unsigned char[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 20]
+, struct sha1dc_ctx *SHA1DC_RESTRICT);
 
-#if defined(__cplusplus)
+#ifdef __cplusplus
 }
 #endif
 
+#undef SHA1DC_FWDPRM_EXTENSION
+#undef SHA1DC_FORWARD_PARAM
+#undef SHA1DC_FORWARDED
+#undef SHA1DC_STATIC_SIZE
+#undef SHA1DC_RESTRICT
 #endif

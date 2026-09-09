@@ -117,14 +117,14 @@ typedef V(16, 32, 512) v16u32;
 void sha1dc_ubc_check_baseline(
   uint32_t const W[static restrict 80]
 , uint8_t        dvmask[static restrict sha1dc_dvmask_bytes()]) {
-  uint32_t possible = -1;
-  if(sha1dc_dvmask_bytes() != sizeof possible) abort();
+  typedef uint32_t whole_dvmask;
+  if(sha1dc_dvmask_bytes() > sizeof(whole_dvmask)) abort();
+  whole_dvmask possible = -1;
   #pragma GCC unroll 9999
   for(size_t i = 0; i < countof sha1dc_ubcs; i++) {
     auto ubc = sha1dc_ubcs[i];
-
-    typedef typeof(possible) [[gnu::aligned(alignof(ubc.dvmask))]] dvmask_t;
-    auto dvs = *(const dvmask_t*)ubc.dvmask;
+    whole_dvmask dvs = {};
+    memcpy(&dvs, ubc.dvmask, sha1dc_dvmask_bytes());
 
     char
       common = ubc.i <= ubc.j ? ubc.i : ubc.j,
