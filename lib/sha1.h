@@ -12,8 +12,15 @@
 extern "C" {
 #endif
 
+#include <stddef.h>
 #include <stdint.h>
 #include <limits.h>
+
+#if defined __has_c_attribute || defined __has_cpp_attribute
+#define SHA1DC_ATTR(p) [[p]]
+#else
+#define SHA1DC_ATTR(p)
+#endif
 
 #if defined __GNUC__ && !defined __clang__ && !defined __cplusplus
 # define SHA1DC_FWDPRM_EXTENSION __extension__
@@ -132,17 +139,20 @@ SHA1DC_FWDPRM_EXTENSION void sha1dc_ingest(
 // needs to be reinitialized if it is to be reused.
 //
 // Returns whether a collision was detected.
-bool sha1dc_finish(
-  unsigned char[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 20]
+bool sha1dc_finish SHA1DC_ATTR(gnu::access(write_only, 1))(
+  unsigned char[SHA1DC_STATIC_SIZE 20]
 , struct sha1dc_ctx *SHA1DC_RESTRICT);
 
 #ifdef __cplusplus
 }
 #endif
 
+#ifndef SHA1DC_KEEP_DEFINES
+#undef SHA1DC_ATTR
 #undef SHA1DC_FWDPRM_EXTENSION
 #undef SHA1DC_FORWARD_PARAM
 #undef SHA1DC_FORWARDED
 #undef SHA1DC_STATIC_SIZE
 #undef SHA1DC_RESTRICT
+#endif
 #endif
