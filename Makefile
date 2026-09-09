@@ -22,7 +22,7 @@ LIBDIR     = $(PREFIX)/lib
 INCLUDEDIR = $(PREFIX)/include/sha1dc
 
 CC     ?= gcc
-LD     ?= gcc
+LD      = gcc
 AR      = gcc-ar
 CC_DEP ?= $(CC)
 
@@ -34,8 +34,26 @@ LIBTOOL ?= libtool
 INSTALL ?= install
 endif
 
-
-CFLAGS = -O2 -Wall -Wextra -Wno-parentheses -pedantic -std=c2y -Ilib
+# libtool flatly does not understand partial linking: it cannot take a set of
+# .lo files and produce another .lo file. `libtool --mode=link $CC -o out.lo`
+# will cause libtool to run `ld -r -o out.lo`, which a) uses the wrong driver
+# (plain `ld`, without an LTO plugin, preserves but does not act on LTO data)
+# and b) produces a binary object file for `out.lo`, which means libtool cannot
+# read it back in as a libtool object (since it isn't a libtool object).
+# `libtool --mode=compile $CC in*.lo` also won't work, because libtool won't
+# replace .lo files with their real .o files on a *compiler* command line.
+#
+# But the compiler driver (or at least, GCC) can directly turn multiple .c files
+# into one .o file, with LTO, when -r is passed. This precludes incremental
+# rebuilds, which is annoying, but it is the only thing that works with libtool.
+#
+# So: flag to $CC to produce "an .o file" (relocatable object). This can be -c
+# (which only works when compiling one source file), or -r (which is general).
+RELOC      = -c
+RELOC.LTO  = -r
+CFLAGS     = -O2 -flto -ffat-lto-objects
+CFLAGS    += -std=c2y -Wall -Wextra -Wno-parentheses -pedantic
+CPPFLAGS   = -Ilib
 # no LDFLAGS
 
 LT_CC      = $(LIBTOOL) --tag=CC --mode=compile $(CC)
@@ -43,23 +61,27 @@ LT_CC_DEP  = $(CC)
 LT_LD      = $(LIBTOOL) --tag=CC --mode=link    $(CC)
 LT_INSTALL = $(LIBTOOL) --tag=CC --mode=install $(INSTALL)
 
-MKDIR = mkdir -p
+ENSUREDIR = @mkdir -p $(@D)
+H_DEP := $(shell find . -type f -name "*.h")
+FS_LIB = $(wildcard $(LIB_DIR)/*.c)
+FS_SRC = $(wildcard $(SRC_DIR)/*.c)
+FS_OBJ_LIB = $(FS_LIB:$(LIB_DIR)/%.c=$(LIB_OBJ_DIR)/%.o)
+FS_OBJ_SRC = $(FS_SRC:$(SRC_DIR)/%.c=$(SRC_OBJ_DIR)/%.$(OBJ_EXT))
+FS_DEP_LIB = $(FS_LIB:$(LIB_DIR)/%.c=$(LIB_DEP_DIR)/%.d)
+FS_DEP_SRC = $(FS_SRC:$(SRC_DIR)/%.c=$(SRC_DEP_DIR)/%.d)
 
 ifneq (, $(shell which $(LIBTOOL) 2>/dev/null ))
-CC         = $(LT_CC)
-CC_DEP     = $(LT_CC_DEP)
-LD         = $(LT_LD)
-LDLIB      = $(LT_LD)
-LIB_EXT    = la
+LIB_EXT  = la
+OBJ_EXT  = lo
+LD      := $(LT_LD)
+INSTALL := $(LT_INSTALL)
 else
-LIB_EXT    = a
-LD         = $(CC)
-LT_INSTALL = $(INSTALL)
+LIB_EXT  = a
+OBJ_EXT  = o
 endif
 
 CFLAGS  += $(TARGETCFLAGS)
 LDFLAGS += $(TARGETLDFLAGS)
-
 
 LIB_DIR     = lib
 LIB_DEP_DIR = dep_lib
@@ -68,27 +90,16 @@ SRC_DIR     = src
 SRC_DEP_DIR = dep_src
 SRC_OBJ_DIR = obj_src
 
-H_DEP := $(shell find . -type f -name "*.h")
-FS_LIB = $(wildcard $(LIB_DIR)/*.c)
-FS_SRC = $(wildcard $(SRC_DIR)/*.c)
-FS_OBJ_SRC = $(FS_SRC:$(SRC_DIR)/%.c=$(SRC_OBJ_DIR)/%.lo)
-FS_OBJ = $(FS_OBJ_SRC) $(FS_OBJ_LIB)
-FS_DEP_LIB = $(FS_LIB:$(LIB_DIR)/%.c=$(LIB_DEP_DIR)/%.d)
-FS_DEP_SRC = $(FS_SRC:$(SRC_DIR)/%.c=$(SRC_DEP_DIR)/%.d)
-FS_DEP = $(FS_DEP_SRC) $(FS_DEP_LIB)
-
-.SUFFIXES: .c .d
-
 .PHONY: all
 all: library tools
 
 .PHONY: install
 install: all
-	$(LT_INSTALL) -d $(LIBDIR) $(BINDIR) $(INCLUDEDIR)
-	$(LT_INSTALL) bin/libsha1detectcoll.$(LIB_EXT) $(LIBDIR)/libsha1detectcoll.$(LIB_EXT)
-	$(LT_INSTALL) lib/sha1.h $(INCLUDEDIR)/sha1.h
-	$(LT_INSTALL) bin/sha1dcsum $(BINDIR)/sha1dcsum
-	$(LT_INSTALL) bin/sha1dcsum_partialcoll $(BINDIR)/sha1dcsum_partialcoll
+	$(INSTALL) -d $(LIBDIR) $(BINDIR) $(INCLUDEDIR)
+	$(INSTALL) bin/libsha1detectcoll.$(LIB_EXT) $(LIBDIR)/libsha1detectcoll.$(LIB_EXT)
+	$(INSTALL) lib/sha1.h $(INCLUDEDIR)/sha1.h
+	$(INSTALL) bin/sha1dcsum $(BINDIR)/sha1dcsum
+	$(INSTALL) bin/sha1dcsum_partialcoll $(BINDIR)/sha1dcsum_partialcoll
 
 .PHONY: uninstall
 uninstall:
@@ -99,13 +110,14 @@ uninstall:
 
 .PHONY: clean
 clean:
-	-find . -type f -name '*.a' -print -delete
-	-find . -type f -name '*.d' -print -delete
-	-find . -type f -name '*.o' -print -delete
-	-find . -type f -name '*.la' -print -delete
-	-find . -type f -name '*.lo' -print -delete
-	-find . -type f -name '*.so' -print -delete
+	-find . -type f -name '*.a'   -print -delete
+	-find . -type f -name '*.d'   -print -delete
+	-find . -type f -name '*.o'   -print -delete
+	-find . -type f -name '*.la'  -print -delete
+	-find . -type f -name '*.lo'  -print -delete
+	-find . -type f -name '*.so'  -print -delete
 	-find . -type d -name '.libs' -print | xargs -r rm -rv
+	-rmdir obj_src dep_src obj_lib dep_lib
 	-rm -rf bin
 
 .PHONY: test
@@ -132,41 +144,47 @@ sha1dcsum: bin/sha1dcsum
 .PHONY: sha1dcsum_partialcoll
 sha1dcsum_partialcoll: bin/sha1dcsum_partialcoll
 
-
 .PHONY: library
 library: bin/libsha1detectcoll.$(LIB_EXT)
 
-bin/libsha1detectcoll.o: $(FS_LIB)
-	$(MKDIR) $(@D) && $(CC) $(CFLAGS) -r -o $@ $^
-bin/libsha1detectcoll.a: bin/libsha1detectcoll.o
-	$(MKDIR) $(@D) && $(AR) $(ARFLAGS) $@ $<
-bin/libsha1detectcoll.la: bin/libsha1detectcoll.o
-	$(MKDIR) $(@D) && $(LDLIB) $(LDFLAGS) $< -rpath $(LIBDIR) -version-info $(LIBCOMPAT) -o $@
-
 bin/sha1dcsum: $(FS_OBJ_SRC) bin/libsha1detectcoll.$(LIB_EXT)
-	$(LD) $(LDFLAGS) $(FS_OBJ_SRC) -Lbin -lsha1detectcoll -o bin/sha1dcsum
+	$(LD) $(LDFLAGS) $(FS_OBJ_SRC) -Lbin -lsha1detectcoll -o $@
 
 bin/sha1dcsum_partialcoll: $(FS_OBJ_SRC) bin/libsha1detectcoll.$(LIB_EXT)
-	$(LD) $(LDFLAGS) $(FS_OBJ_SRC) -Lbin -lsha1detectcoll -o bin/sha1dcsum_partialcoll
+	$(LD) $(LDFLAGS) $(FS_OBJ_SRC) -Lbin -lsha1detectcoll -o $@
 
-
-MAKE.DEP = $(MKDIR) $(@D) && $(CC_DEP) $(CFLAGS) -M -MF $@ $<
-MAKE.OBJ = $(MKDIR) $(@D) && $(CC)     $(CFLAGS) -c -o  $@ $<
-
+COMPILE.c = $(CC) $(CFLAGS) $(CPPFLAGS) $(RELOC)     -o  $@ $(filter %.c,$^)
+DEPS.c    = $(CC) $(CFLAGS) $(CPPFLAGS) -M           -MF $@ $(filter %.c,$^)
+COMPILE.o = $(CC) $(CFLAGS)             $(RELOC.LTO) -o  $@ $(filter %.o,$^)
 
 $(SRC_DEP_DIR)/%.d:  $(SRC_DIR)/%.c
-	$(MAKE.DEP)
+	$(ENSUREDIR)
+	$(DEPS.c)
 $(SRC_OBJ_DIR)/%.lo: $(SRC_DIR)/%.c $(SRC_DEP_DIR)/%.d $(H_DEP)
-	$(MAKE.OBJ)
+	$(ENSUREDIR)
+	$(let CC,$(LT_CC),$(COMPILE.c))
 $(SRC_OBJ_DIR)/%.o:  $(SRC_DIR)/%.c $(SRC_DEP_DIR)/%.d $(H_DEP)
-	$(MAKE.OBJ)
+	$(ENSUREDIR)
+	$(COMPILE.c)
 
+$(LIB_DEP_DIR)/%.d: $(LIB_DIR)/%.c
+	$(ENSUREDIR)
+	$(DEPS.c)
+$(LIB_OBJ_DIR)/%.o: $(LIB_DIR)/%.c $(LIB_DEP_DIR)/%.d $(H_DEP)
+	$(ENSUREDIR)
+	$(COMPILE.c)
+# see note on libtool above: it does not understand a .lo -> .lo step, so we
+# stick to a single (non-incremental) .c -> .lo step
+bin/libsha1detectcoll.lo: $(FS_LIB) $(H_DEP)
+	$(ENSUREDIR)
+	$(let CC,$(LT_CC),$(let RELOC,$(RELOC.LTO),$(COMPILE.c)))
+bin/libsha1detectcoll.o: $(FS_OBJ_LIB)
+	$(ENSUREDIR)
+	$(COMPILE.o)
 
-$(LIB_DEP_DIR)/%.d:  $(LIB_DIR)/%.c
-	$(MAKE.DEP)
-$(LIB_OBJ_DIR)/%.lo: $(LIB_DIR)/%.c $(LIB_DEP_DIR)/%.d $(H_DEP)
-	$(MAKE.OBJ)
-$(LIB_OBJ_DIR)/%.o:  $(LIB_DIR)/%.c $(LIB_DEP_DIR)/%.d $(H_DEP)
-	$(MAKE.OBJ)
+bin/libsha1detectcoll.a: bin/libsha1detectcoll.o
+	$(AR) $(ARFLAGS) $@ $^
+bin/libsha1detectcoll.la: bin/libsha1detectcoll.lo
+	$(LT_LD) $(LDFLAGS) $^ -rpath $(LIBDIR) -version-info $(LIBCOMPAT) -o $@
 
--include $(FS_DEP)
+-include $(FS_DEP_SRC) $(FS_DEP_LIB)
