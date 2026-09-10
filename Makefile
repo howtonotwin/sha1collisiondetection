@@ -110,15 +110,7 @@ uninstall:
 
 .PHONY: clean
 clean:
-	-find . -type f -name '*.a'   -print -delete
-	-find . -type f -name '*.d'   -print -delete
-	-find . -type f -name '*.o'   -print -delete
-	-find . -type f -name '*.la'  -print -delete
-	-find . -type f -name '*.lo'  -print -delete
-	-find . -type f -name '*.so'  -print -delete
-	-find . -type d -name '.libs' -print | xargs -r rm -rv
-	-rmdir obj_src dep_src obj_lib dep_lib
-	-rm -rf bin
+	rm -rf obj_src dep_src obj_lib dep_lib bin
 
 .PHONY: test
 test: tools
