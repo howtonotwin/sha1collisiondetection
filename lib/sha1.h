@@ -53,15 +53,15 @@ extern "C" {
 #endif
 
 // The type of SHA-1 expannded message blocks.
-typedef uint32_t sha1_expanded_block_t[80];
+typedef uint32_t sha1_expanded_block[80];
 // The type of SHA-1 hashes, the type of the input and output of the SHA-1
 // compressor, and the type of the compressor's intermediate states.
-typedef uint32_t sha1_chaining_value_t[5];
+typedef uint32_t sha1_chaining_value[5];
 // A callback for handling collision blocks when they are found.
-typedef void sha1dc_collision_handler_t(
+typedef void sha1dc_collision_handler(
   void *closure, uint64_t byte_offset
-, const sha1_chaining_value_t in_1, const sha1_chaining_value_t in_2
-, const sha1_expanded_block_t mb_1, const sha1_expanded_block_t mb_2);
+, const sha1_chaining_value in_1, const sha1_chaining_value in_2
+, const sha1_expanded_block mb_1, const sha1_expanded_block mb_2);
 
 // Various "plain SHA1" functions may be optionally exported, but we do not
 // declare them here.
@@ -78,12 +78,12 @@ struct sha1dc_ctx {
 	bool ubc_check          : 1;
 	bool reduced_round_coll : 1;
 
-  sha1dc_collision_handler_t *collision;
+  sha1dc_collision_handler *collision;
   void *collision_closure;
 
-	sha1_chaining_value_t ihv1, ihv2;
-  sha1_expanded_block_t m1, m2;
-  sha1_chaining_value_t states[80];
+  sha1_chaining_value ihv1, ihv2;
+  sha1_expanded_block m1, m2;
+  sha1_chaining_value states[80];
 };
 
 // Initialize the context with the default library settings and the hash
@@ -126,7 +126,7 @@ void sha1dc_set_detect_reduced_round_coll(struct sha1dc_ctx*, bool);
 // Set a handler for detected collisions, or `nullptr` to not call any handler.
 // Set to `nullptr` by default.
 void sha1dc_set_callback(
-  struct sha1dc_ctx*, sha1dc_collision_handler_t*, void*);
+  struct sha1dc_ctx*, sha1dc_collision_handler*, void*);
 
 // Add some message data to the hash.
 SHA1DC_FWDPRM_EXTENSION void sha1dc_ingest(

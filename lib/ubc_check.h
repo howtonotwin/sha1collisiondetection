@@ -19,7 +19,7 @@ struct sha1dc_disturbance_vector {
     sha1dc_disturbance_vector_class_I = 1,
     sha1dc_disturbance_vector_class_II
   }             class;
-  unsigned char k, b, test_t;
+  unsigned char k, b, test_state;
   uint32_t      message_mask[80];
 };
 // "Easiest" known attack classes

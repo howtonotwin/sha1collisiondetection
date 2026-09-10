@@ -85,7 +85,7 @@ typedef V(16, 32, 512) v16u32;
 #define sha1dc_disturbance_vector_dv_class     class
 #define sha1dc_disturbance_vector_k            k
 #define sha1dc_disturbance_vector_b            b
-#define sha1dc_disturbance_vector_test_t       test_t
+#define sha1dc_disturbance_vector_test_state   test_state
 #define sha1dc_disturbance_vector_message_mask message_mask
 #define sha1dc_ubc_a      a
 #define sha1dc_ubc_b      b
@@ -97,7 +97,7 @@ typedef V(16, 32, 512) v16u32;
 #undef sha1dc_disturbance_vector_dv_class
 #undef sha1dc_disturbance_vector_k
 #undef sha1dc_disturbance_vector_b
-#undef sha1dc_disturbance_vector_test_t
+#undef sha1dc_disturbance_vector_test_state
 #undef sha1dc_disturbance_vector_message_mask
 #undef sha1dc_ubc_a
 #undef sha1dc_ubc_b

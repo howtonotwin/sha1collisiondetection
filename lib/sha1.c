@@ -157,7 +157,7 @@ static inline void sha1_step_bw(
 DECLARE_PLAIN_SHA1(void sha1_add_block)(
   uint32_t       cv[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]
 , const uint32_t  W[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 80]) {
-  sha1_chaining_value_t state;
+  sha1_chaining_value state;
   memcpy(state, cv, sizeof state);
 
 #pragma GCC unroll 999
@@ -170,8 +170,8 @@ DECLARE_PLAIN_SHA1(void sha1_add_block)(
 DECLARE_PLAIN_SHA1(void sha1_add_block_expanding)(
   uint32_t               cv[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]
 , const uint32_unaligned  m[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 16]) {
-  sha1_expanded_block_t W;
-  sha1_chaining_value_t state;
+  sha1_expanded_block W;
+  sha1_chaining_value state;
   memcpy(state, cv, sizeof state);
 
 #pragma GCC unroll 999
@@ -191,9 +191,9 @@ DECLARE_PLAIN_SHA1(void sha1_add_block_expanding_saving)(
   uint32_t               cv[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]
 , const uint32_unaligned  m[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 16]
 , uint32_t                W[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 80]
-, sha1_chaining_value_t  states[
+, sha1_chaining_value  states[
     SHA1DC_STATIC_SIZE SHA1DC_RESTRICT sha1dc_n_needed_states]) {
-  sha1_chaining_value_t  state;
+  sha1_chaining_value  state;
   memcpy(state, cv, sizeof state);
   size_t saved = 0;
 
@@ -223,14 +223,14 @@ static inline void sha1_add_block_predict [[gnu::always_inline]](
 , uint32_t         cv_in[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]
 , uint32_t        cv_out[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]
 , const uint32_t       W[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 80]
-, const uint32_t state_t[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]) {
-  memcpy(cv_in,  state_t, sizeof(sha1_chaining_value_t));
-  memcpy(cv_out, state_t, sizeof(sha1_chaining_value_t));
+, const uint32_t t_state[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]) {
+  memcpy(cv_in,  t_state, sizeof(sha1_chaining_value));
+  memcpy(cv_out, t_state, sizeof(sha1_chaining_value));
 #pragma GCC unroll 999
   for(unsigned char i = t; i--;)        sha1_step_bw(cv_in,  W[i], i);
 #pragma GCC unroll 999
   for(unsigned char i = t; i < 80; i++)    sha1_step(cv_out, W[i], i);
-  for(size_t i = 0; i < countof(sha1_chaining_value_t); i++)
+  for(size_t i = 0; i < countof(sha1_chaining_value); i++)
     cv_out[i] += cv_in[i];
 }
 
@@ -280,12 +280,12 @@ static void sha1_recompress_at(
 , uint32_t        cv_in[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]
 , uint32_t       cv_out[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]
 , const uint32_t      W[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 80]
-, const uint32_t   cv_t[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]) {
+, const uint32_t   t_cv[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]) {
   switch(t) {
 #define USE_SHA1_RECOMPRESS(N) \
     case N:                                          \
       if(sha1dc_need_state[N] == -1) unreachable();  \
-      sha1_recompress_ ## N(cv_in, cv_out, W, cv_t); \
+      sha1_recompress_ ## N(cv_in, cv_out, W, t_cv); \
       break;
   USE_SHA1_RECOMPRESS( 0) USE_SHA1_RECOMPRESS( 1) USE_SHA1_RECOMPRESS( 2)
   USE_SHA1_RECOMPRESS( 3) USE_SHA1_RECOMPRESS( 4) USE_SHA1_RECOMPRESS( 5)
@@ -338,12 +338,12 @@ static void sha1dc_process(
       ctx->m2[j] = ctx->m1[j];
       ctx->m2[j] ^= sha1dc_disturbance_vectors[i].message_mask[j];
     }
-    size_t saved = sha1dc_need_state[sha1dc_disturbance_vectors[i].test_t];
+    size_t saved = sha1dc_need_state[sha1dc_disturbance_vectors[i].test_state];
     if(saved >= sha1dc_n_needed_states) unreachable();
 
-    sha1_chaining_value_t cv_alternate;
+    sha1_chaining_value cv_alternate;
     sha1_recompress_at(
-      sha1dc_disturbance_vectors[i].test_t
+      sha1dc_disturbance_vectors[i].test_state
     , ctx->ihv2, cv_alternate
     , ctx->m2, ctx->states[saved]);
 
@@ -393,7 +393,7 @@ void sha1dc_set_detect_reduced_round_coll(
 
 void sha1dc_set_callback(
   struct sha1dc_ctx *ctx
-, sha1dc_collision_handler_t *collision, void *closure) {
+, sha1dc_collision_handler *collision, void *closure) {
   ctx->collision = collision;
   ctx->collision_closure = closure;
 }
