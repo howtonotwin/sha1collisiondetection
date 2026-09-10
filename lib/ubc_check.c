@@ -1,6 +1,10 @@
 // Tweakables
 #ifndef ENABLE_AVX512
-# define ENABLE_AVX512 1
+  // Similar to but different from the check in sha1.c
+# if defined __amd64__ || defined __amd64 || defined __x86_64__ || \
+     defined __x86_64  || defined _M_X64  || defined _M_AMD64
+#   define ENABLE_AVX512 1
+# endif
 #endif
 #ifndef ALWAYS_AVX512
 # define ALWAYS_AVX512 0
@@ -24,12 +28,12 @@
 #   define PARALLEL_ACCUMULATORS 1
 # endif
 #endif
-#define USED_AVX512_FEATURES(X) \
+#define USED_AVX512_FEATURES(X, L) \
   X("avx512f")    \
   X("avx512bw")   \
   X("avx512dq")   \
   X("avx512vl")   \
-  X("avx512vbmi")
+  L("avx512vbmi")
 
 // Headers
 #include <stdbit.h>
@@ -48,11 +52,14 @@
 typedef bool bit;
 #if ENABLE_AVX512
   // Setting up vector types ("vNuM").
-  // Note: <immintrin.h> __mmNNNi types can be read from objects of any type, but
-  //       not the other way around (just like standard C char).
+  // Note: <immintrin.h> __mmNNNi types can be read from objects of any type,
+  //       with similar rules to standard C char.
 # define U(M) uint ## M ## _t
 # if __GNUC__
 #   define V(N, M) U(M) __attribute__((vector_size(N * sizeof(U(M)))))
+// FIXME: These are also used in this file proper as typed alternatives to
+//        __m512i. But they are not appropriate for active variables (i.e.
+//        registers), only for memory. (This is blocking MSVC support.)
 typedef V(64,  8) v64u8;
 typedef V(16, 32) v16u32;
 #   undef V
@@ -99,28 +106,52 @@ typedef V(16, 32, 512) v16u32;
 #undef sha1dc_ubc_c
 #undef sha1dc_ubc_dvmask
 
-// Now set up some preprocessor magic
+// Now figure out how to enable AVX-512 in a limited region of code.
 #define PRAGMA_WORDS(...)            _Pragma(# __VA_ARGS__)
 #define STRICT1(M, x)                M(x)
 #define FEATURE_INTO_TARGET(feature) feature ","
-#define SET_FEATURES(F)              \
-  STRICT1(PRAGMA_WORDS, GCC target F(FEATURE_INTO_TARGET))
+#define IDENTITY1(x)                 x
+#if defined  __clang__
+# define SET_FEATURES(F) \
+    STRICT1(                                                       \
+      PRAGMA_WORDS                                                 \
+    , clang attribute push (                                       \
+        __attribute__((target(F(FEATURE_INTO_TARGET, IDENTITY1)))) \
+      , apply_to=function))
+# define RESET_FEATURES  _Pragma("clang attribute pop")
+#elif defined __GNUC__
+# define SET_FEATURES(F) \
+    _Pragma("GCC push_options") \
+    STRICT1(PRAGMA_WORDS, GCC target F(FEATURE_INTO_TARGET, IDENTITY1))
+# define RESET_FEATURES  _Pragma("GCC pop_options")
+#endif
 
 // Now code.
 #if !ALWAYS_AVX512
-// This is actually *faster* than the one from 2017 already. Unrolling! But e.g.
-// MSVC is obstinate and won't unroll this, because it can't see it gets faster,
-// so generating unrolled source code is still a good next step.
+// This, on Clang and GCC, is roughly equivalent to the one from 2017 due to the
+// (forced) total unrolling and then the ensuing constant propagation. Actually,
+// this one is marginally *faster*, even though it's missing some features of
+// the original. TODO: This warrants investigation.
 //
-// Also, it appears to have much worse variance in runtime, presumably because
-// the low probability UBCs after the early return are not grouped by DV.
+// Compilers that don't listen to the unroll pragma (e.g. MSVC) usually won't
+// make the decision to unroll this based on their heuristics, and so they will
+// produce extremely slow code. So TODO: generating unrolled source code instead
+// of relying on the compiler to do it would be useful here.
+//
+// Also, this version appears to have much worse variance in runtime, presumably
+// because the low probability UBCs after the early return are not grouped by
+// DV. (That's one of the features missing from the original.) TODO: make
+// parse_bitrel output fancier data.
+//
+// Fun fact: When given permission, Clang can actually auto-vectorize this and
+// get a maybe ~10% boost in sha1dcsum. But we can do better.
 void sha1dc_ubc_check_baseline(
   uint32_t const W[static restrict 80]
 , uint8_t        dvmask[static restrict sha1dc_dvmask_bytes()]) {
   typedef uint32_t whole_dvmask;
   if(sha1dc_dvmask_bytes() > sizeof(whole_dvmask)) abort();
   whole_dvmask possible = -1;
-  #pragma GCC unroll 9999
+#pragma GCC unroll 999
   for(size_t i = 0; i < countof sha1dc_ubcs; i++) {
     auto ubc = sha1dc_ubcs[i];
     whole_dvmask dvs = {};
@@ -145,11 +176,7 @@ void sha1dc_ubc_check_baseline(
 #endif
 
 #if ENABLE_AVX512
-# pragma GCC push_options
   SET_FEATURES(USED_AVX512_FEATURES)
-
-typedef uint32_t [[gnu::vector_size(64)]] v16u32;
-typedef uint8_t  [[gnu::vector_size(64)]] v64u8;
 
   // Format given inline-asm named operands for use in an x86 assembly template.
 # define AVX512_ARGS3K(dst, k, src1, src2) \
@@ -175,26 +202,32 @@ typedef uint8_t  [[gnu::vector_size(64)]] v64u8;
 // "OR mask vector 16 uint32_t memory"
 static inline v16u32 or_mv16u32_mem [[gnu::always_inline, gnu::artificial]](
   v16u32 dst, __mmask16 k, v16u32 src1, v16u32 const *src2) {
+#if defined __GNUC__ && !defined __clang__
   __asm__(
     "vpord" AVX512_ARGS3K(dst, k, src1, src2)
   : [dst]"+v"(dst)
   : [k]"Yk"(k), [src1]"v"(src1), [src2]"m"(*src2));
+#else
+  dst = _mm512_mask_or_epi32(dst, k, src1, *src2);
+#endif
   return dst;
 }
 
 void sha1dc_ubc_check_avx512(
   uint32_t const W[static restrict 80]
 , uint8_t        out[static restrict sha1dc_dvmask_bytes()]) {
-  const v64u8 [[gnu::aligned(alignof *W)]] *Wv64 =
-    (const void*)&W[sha1dc_avx512_bias];
-  v64u8 w1 = Wv64[0], w2 = Wv64[1];
+  v64u8
+    w1 = (typeof(w1))_mm512_loadu_epi8(
+      &W[sha1dc_avx512_bias]),
+    w2 = (typeof(w2))_mm512_loadu_epi8(
+      &W[sha1dc_avx512_bias + sizeof w1 / sizeof *W]);
 
   // The table generator has picked out a vectorizable integer type wide enough
   // to hold a dvmask and used it to arrange the dvmask table.
   // (The type is currently uint32_t and this code is NOT generic over it (e.g.
   // the intrinsic functions have the width in their names), but it is heavily
   // typed to hopefully make it clear what choices depend on what.)
-  typedef typeof_unqual(sha1dc_avx512_v64ubc_dvmasks[0][0][0]) dvmask_t;
+  typedef typeof_unqual(sha1dc_avx512_v64ubc_dvmasks[0][0][0]) whole_dvmask;
   // Accumulator(s) (under OR) for the dvmasks of UBCs that fail.
   //
   // Each incoming mask will go to one of the lanes essentially arbitrarily, so
@@ -204,7 +237,7 @@ void sha1dc_ubc_check_avx512(
   // only `reg = ~reg & mem`). There is, of course, one for `reg |= mem`. (The
   // alternative is to remove the `~` in `reg &= ~mem` by inverting the dvmask
   // tables statically, but that'd be ugly.)
-  dvmask_t [[gnu::vector_size(64)]] impossible[
+  __attribute__((vector_size(64))) whole_dvmask impossible[
     // Creating one long dependency chain on one accumulator makes the latency
     // of this whole function a bit higher than it needs to be. We can instead
     // alternate between two accumulators and join them up at the end. This
@@ -224,6 +257,9 @@ void sha1dc_ubc_check_avx512(
     //     should be no difference in throughput. In context,
     //     PARALLEL_ACCUMULATORS=2 produces a slightly faster (~1-3%, in MB/s)
     //     sha1dcsum. The next few values up have no clear effect.
+    // NB: Clang currently gets a few percent slower at PARALLEL_ACCUMULATORS=2
+    //     instead of a few percent faster. Since Clang's code is horrible
+    //     for other reasons (see below), we don't deal with that right now.
     PARALLEL_ACCUMULATORS]
 #if !UNROLLING_LOOPS
       = {}
@@ -232,9 +268,9 @@ void sha1dc_ubc_check_avx512(
   ;
 
   // The accumulator register is not nearly big enough to hold 64 dvmasks for 64
-  // UBCs. Its actual width, in units of dvmask_t, is
+  // UBCs. Its actual width, in units of whole_dvmask, is
   constexpr static size_t impossible_dvmasks =
-    // countof IMPOSSIBLE; // not supported
+    // countof *impossible; // not supported
     sizeof *impossible / sizeof (*impossible)[0];
   // Once we evaluate 64 UBCs and have a "vector" (a mask) of 64 results, it'll
   // need to be broken up into this many chunks:
@@ -267,7 +303,30 @@ void sha1dc_ubc_check_avx512(
       b2 = _mm512_test_epi8_mask(
         (__m512i)y
       , (__m512i)sha1dc_avx512_v64ubc_ns[i]),
-      ne = _kxor_mask64(_kxor_mask64(b1, b2), sha1dc_avx512_v64ubc_cs[i]);
+    // Clang, sillily, pulls the masks from k-regs into GPRs to do the XORs with
+    // ubc_cs and also the shifts that come later. It then pushes the masks (now
+    // 4 times as many) back into k-regs to do the masked ORs (dvmask
+    // accumulation into impossible). This takes so long that this nested loop
+    // is effectively deinterleaved into two loops in series, one evaluating
+    // UBCs and then one accumulating dvmasks. Empirically, a sha1dcsum built
+    // with Clang is ~10% slower than one with GCC (in overall MB/s).
+    //
+    // Interestingly, both in benchmarks and in theory (i.e., in llvm-mca),
+    // Clang's code and GCC's code do have the same throughput, to within ~1
+    // cycle/call. Clang is effectively betting that parallelism between calls
+    // of this function will make up for the intra-call parallelism that it's
+    // destroying. But calls to ubc_check are usually separated by a whole
+    // expansion/compression cycle, so Clang's code remains slow.
+    //
+    // There is probably a way to fix this, just like we do fix up GCC's bad
+    // choices, but this has not been implemented. The simplest idea would be to
+    // replace the "normal" uint64_t load here and the uint64_t shifts later
+    // with the equivalent k-reg intrinsics (like how GCC's tendency to make the
+    // same mistake here is controlled by using _kxor_mask64 and not ^), but
+    // Clang doesn't take the hint.
+      ne = _kxor_mask64(
+        _kxor_mask64(b1, b2)
+      , sha1dc_avx512_v64ubc_cs[i]);
 #if UNROLLING_LOOPS
 #pragma GCC unroll 999
 #endif
@@ -296,53 +355,62 @@ void sha1dc_ubc_check_avx512(
 
   for(size_t i = 1; i < PARALLEL_ACCUMULATORS; i++)
     *impossible |= impossible[i];
-#if !__OPTIMIZE__
+#if !defined __GNUC__ || !__OPTIMIZE__
   // GCC ends this line in the instructions
   //     vpord       xmmA, xmmB, xmmA             # fold up the pairs of u32
   //     vpternlogd  xmmA, xmmA, xmmA, 0b01010101 # "xmmA = !xmmA"
   // This is rather silly, since those could be the one instruction
   //     vpternlogd  xmmA, xmmA, xmmB, 0b00010001 # "xmmA = ~(xmmA | xmmB)"
   // There's also a pointless mov somewhere in there...
-  dvmask_t possible = ~_mm512_reduce_or_epi32((__m512i)*impossible);
+  //
+  // Clang ends with
+  //     vpxord      xmmC, xmmC, xmmC             # zero xmmC
+  //     vpternlogd  xmmC, xmmA, xmmB, 0b00010001
+  // for both versions of this code. Whether this is a win has not been checked.
+  whole_dvmask possible = ~_mm512_reduce_or_epi32((__m512i)*impossible);
 #else
   // If you want something done right, do it yourself!
   // (Maybe one day this block can be removed.)
-  dvmask_t [[gnu::vector_size(32)]] half = (typeof(half))_mm256_or_epi32(
-    _mm512_extracti32x8_epi32((__m512i)*impossible, 0)
-  , _mm512_extracti32x8_epi32((__m512i)*impossible, 1));
-  dvmask_t [[gnu::vector_size(16)]] quarter = (typeof(quarter))_mm_or_epi32(
-    _mm256_extracti32x4_epi32((__m256i)half, 0)
-  , _mm256_extracti32x4_epi32((__m256i)half, 1));
+  whole_dvmask
+    half    __attribute__((vector_size(32))) = (typeof(half))_mm256_or_epi32(
+      _mm512_extracti32x8_epi32((__m512i)*impossible, 0)
+    , _mm512_extracti32x8_epi32((__m512i)*impossible, 1)),
+    quarter __attribute__((vector_size(16))) = (typeof(quarter))_mm_or_epi32(
+      _mm256_extracti32x4_epi32((__m256i)half, 0)
+    , _mm256_extracti32x4_epi32((__m256i)half, 1)),
   // Keep going in the vector unit instead of extracting to GPR (expensive).
-  dvmask_t [[gnu::vector_size(16)]] eighths = (typeof(eighths))_mm_or_epi32(
-    (__m128i)quarter
-  , _mm_shuffle_epi32(
+    eighths __attribute__((vector_size(16))) = (typeof(eighths))_mm_or_epi32(
       (__m128i)quarter
-    , 0b01'00'11'10 /* [1, 0, 3, 2] "swap upper u64 with lower u64" */));
-  dvmask_t [[gnu::vector_size(16)]] up16th = (typeof(up16th))_mm_shuffle_epi32(
-    (__m128i)eighths
-  , 0b01'01'01'01 /* [1, 1, 1, 1] "broadcast upper u32 of lower u64" */);
+    , _mm_shuffle_epi32(
+        (__m128i)quarter
+      , 0b01'00'11'10 /* [1, 0, 3, 2] "swap upper u64 with lower u64" */)),
+    up16th __attribute__((vector_size(16))) = (typeof(up16th))_mm_shuffle_epi32(
+      (__m128i)eighths
+    , 0b01'01'01'01 /* [1, 1, 1, 1] "broadcast upper u32 of lower u64" */),
   // Final reduction of impossible and "possible = ~impossible;", at once.
-  dvmask_t possible =
-    _mm_ternarylogic_epi32(
-      _mm_undefined_si128(), (__m128i)eighths, (__m128i)up16th
-    , ~(_MM_TERNLOG_B | _MM_TERNLOG_C))
-  [0];
+    possible =
+      _mm_ternarylogic_epi32(
+        _mm_undefined_si128(), (__m128i)eighths, (__m128i)up16th
+      , ~(_MM_TERNLOG_B | _MM_TERNLOG_C))
+    [0];
 #endif
   memcpy(out, &possible, sha1dc_dvmask_bytes());
 }
-# pragma GCC pop_options
+RESET_FEATURES
 
 # if !ALWAYS_AVX512
 static typeof(sha1dc_ubc_check) *pick_ubc_check_impl
 [[gnu::no_sanitize("all")]]() {
   typeof(sha1dc_ubc_check) *impl = sha1dc_ubc_check_baseline;
-  __builtin_cpu_init();
-#   if defined(__GNUC__) || defined(__clang__)
+#   if __GNUC__ >= 8 /* first GCC to check for OS support when needed */ \
+    || __clang_major__ > 3                                               \
+       /* first clang to know the features */                            \
+    || __clang_major__ == 3 &&  __clang_minor__ >= 9
 #     define CHECK_FEATURE_AND(f) __builtin_cpu_supports(f) &&
-  // Since GCC 8, __builtin_cpu_supports checks relevant OS-support flags, so
-  // just using it is enough.
-  if(USED_AVX512_FEATURES(CHECK_FEATURE_AND) true) impl = sha1dc_ubc_check_avx512;
+#     define CHECK_FEATURE(f)     CHECK_FEATURE_AND(f) true
+  __builtin_cpu_init();
+  if(USED_AVX512_FEATURES(CHECK_FEATURE_AND, CHECK_FEATURE))
+    impl = sha1dc_ubc_check_avx512;
 #   else
 #     error "Don't know how to check for AVX-512 with this compiler/platform."
 #   endif
@@ -351,6 +419,7 @@ static typeof(sha1dc_ubc_check) *pick_ubc_check_impl
 # endif
 #endif
 
+// TODO: non-ifunc dispatch, for non-GNU/ELF
 void sha1dc_ubc_check
 #if ENABLE_AVX512 && !ALWAYS_AVX512
   [[gnu::ifunc("pick_ubc_check_impl")]]

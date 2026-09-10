@@ -22,8 +22,8 @@ LIBDIR     = $(PREFIX)/lib
 INCLUDEDIR = $(PREFIX)/include/sha1dc
 
 CC     ?= gcc
-LD      = gcc
-AR      = gcc-ar
+LD     ?= gcc
+AR     ?= gcc-ar
 CC_DEP ?= $(CC)
 
 ifeq ($(shell uname),Darwin)
@@ -73,7 +73,7 @@ FS_DEP_SRC = $(FS_SRC:$(SRC_DIR)/%.c=$(SRC_DEP_DIR)/%.d)
 ifneq (, $(shell which $(LIBTOOL) 2>/dev/null ))
 LIB_EXT  = la
 OBJ_EXT  = lo
-LD      := $(LT_LD)
+override LD := $(LT_LD)
 INSTALL := $(LT_INSTALL)
 else
 LIB_EXT  = a
