@@ -69,14 +69,14 @@ typedef void sha1dc_collision_handler(
 // Overall state needed by the library to do SHA-1 hashing and collision
 // detection for one message stream.
 struct sha1dc_ctx {
-	uint64_t bytes;
-	uint32_t ihv[5];
-	uint32_t buffer[16];
-	bool found_collision    : 1;
-	bool safe_hash          : 1;
-	bool detect_coll        : 1;
-	bool ubc_check          : 1;
-	bool reduced_round_coll : 1;
+  uint64_t bytes;
+  uint32_t ihv[5];
+  uint32_t buffer[16];
+  bool found_collision    : 1;
+  bool safe_hash          : 1;
+  bool detect_coll        : 1;
+  bool ubc_check          : 1;
+  bool reduced_round_coll : 1;
 
   sha1dc_collision_handler *collision;
   void *collision_closure;
