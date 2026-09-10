@@ -18,7 +18,7 @@
 // be *awful* (~70% percent slower). Do not allow this to happen.
 #ifndef UNROLLING_LOOPS
   // This is just a best guess
-# define UNROLLING_LOOPS __GNUC__ && __OPTIMIZE__ && !__OPTIMIZE_SIZE__
+# define UNROLLING_LOOPS (__GNUC__ && __OPTIMIZE__ && !__OPTIMIZE_SIZE__)
 #endif
 // see use, below
 #ifndef PARALLEL_ACCUMULATORS
