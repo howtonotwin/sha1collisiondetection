@@ -74,6 +74,10 @@ typedef V(16, 32) v16u32;
 #define sha1dc_ubc_c      c
 #define sha1dc_ubc_dvmask dvmask
 #include "ubc_check.inc"
+#undef sha1dc_disturbance_vectors
+#undef sha1dc_n_disturbance_vectors
+#undef sha1dc_n_needed_states
+#undef sha1dc_need_state
 #undef sha1dc_disturbance_vector_dv_class
 #undef sha1dc_disturbance_vector_k
 #undef sha1dc_disturbance_vector_b
@@ -415,7 +419,7 @@ void sha1dc_ubc_check
 #endif
 
 extern inline size_t sha1dc_dvmask_bytes();
-bool sha1dc_check_dvmask(
+bool sha1dc_check_dvmask [[gnu::visibility("protected")]](
   const uint8_t dvmask[static restrict sha1dc_dvmask_bytes()]) {
   uint32_t buf;
   for(size_t i = 0; i < sha1dc_dvmask_bytes(); i += sizeof buf) {
@@ -424,3 +428,11 @@ bool sha1dc_check_dvmask(
   }
   return false;
 }
+
+inline size_t sha1dc_dvmask_bytes [[gnu::visibility("protected")]]();
+extern const struct sha1dc_disturbance_vector
+  sha1dc_disturbance_vectors [[gnu::visibility("protected")]][];
+extern const size_t
+  sha1dc_n_disturbance_vectors [[gnu::visibility("protected")]];
+extern const size_t sha1dc_n_needed_states [[gnu::visibility("protected")]];
+extern const signed char sha1dc_need_state [[gnu::visibility("protected")]][];

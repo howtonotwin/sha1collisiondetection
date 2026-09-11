@@ -250,7 +250,7 @@ static void sha1_recompress_at(
   }
 }
 
-void sha1dc_process(
+void sha1dc_process [[gnu::visibility("protected")]](
   struct sha1dc_ctx *restrict ctx
 , const uint32_t block[static restrict 16]) {
   memcpy(ctx->ihv1, ctx->ihv, sizeof ctx->ihv);

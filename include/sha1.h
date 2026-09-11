@@ -58,8 +58,7 @@ struct sha1dc_ctx {
   sha1_chaining_value states[];
 };
 // Number of states that there must be space for in `struct sha1dc_ctx::states`.
-extern const size_t
-sha1dc_n_needed_states [[gnu::visibility("protected")]];
+extern const size_t sha1dc_n_needed_states;
 inline size_t sha1dc_ctx_size() [[unsequenced]] {
   return sizeof(struct sha1dc_ctx)
        + sizeof(sha1_chaining_value) * sha1dc_n_needed_states;
@@ -81,24 +80,23 @@ struct sha1dc_disturbance_vector {
   uint32_t      message_mask[80];
 };
 // "Easiest" known attack classes
-extern const struct sha1dc_disturbance_vector
-sha1dc_disturbance_vectors [[gnu::visibility("protected")]][];
+extern const struct sha1dc_disturbance_vector sha1dc_disturbance_vectors[];
 // The number of attack classes defended against. The difficulty cutoff thus
 // represented is somewhat arbitrary. This is also the number of elements of
 // `sha1dc_disturbance_vectors`.
-extern const size_t
-sha1dc_n_disturbance_vectors [[gnu::visibility("protected")]];
+extern const size_t sha1dc_n_disturbance_vectors;
 
 // The size in `uint8_t`s of a bitmask capable of representing a subset of the
 // `sha1dc_disturbance_vectors`. The bits of the mask correspond to the array
 // elements in little-endian order (`mask[0] & 1` is associated to
 // `sha1dc_disturbance_vectors[0]`, etc.).
-inline size_t sha1dc_dvmask_bytes [[gnu::visibility("protected")]]()
-[[unsequenced]] { return sha1dc_n_disturbance_vectors + 7 >> 3; }
+inline size_t sha1dc_dvmask_bytes() [[unsequenced]] {
+  return sha1dc_n_disturbance_vectors + 7 >> 3;
+}
 // Are any DVs specified in the mask? (This is a convenience/optimization; one
 // may directly check the first `sha1dc_n_disturbance_vectors` bits of
 // `dvmask`.)
-bool sha1dc_check_dvmask [[gnu::visibility("protected")]](
+bool sha1dc_check_dvmask(
   const uint8_t dvmask[static restrict sha1dc_dvmask_bytes()]) [[unsequenced]];
 // Would be inline (the definition is "public"), but then compilers prefer
 // inlining the function to calling it, when the opposite is better.
@@ -110,8 +108,7 @@ bool sha1dc_check_dvmask [[gnu::visibility("protected")]](
 // The nonnegative number for states that are needed is the number of that state
 // among the needed states. I.e. it is the index for that state into an array of
 // states where the unneeded states do not get array elements.
-extern const signed char
-sha1dc_need_state [[gnu::visibility("protected")]][81];
+extern const signed char sha1dc_need_state[81];
 
 // Initialize the context with the default library settings and the hash
 // function state that is appropriate for processing a new message from its
