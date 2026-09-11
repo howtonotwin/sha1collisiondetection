@@ -1,3 +1,4 @@
+#pragma once
 /***
 * Copyright 2017 Marc Stevens <marc@marc-stevens.nl>, Dan Shumow <danshu@microsoft.com>
 * Distributed under the MIT Software License.
@@ -5,24 +6,11 @@
 * https://opensource.org/licenses/MIT
 ***/
 
-#ifndef SHA1DC_SHA1_H
-#define SHA1DC_SHA1_H
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <stddef.h>
 #include <stdint.h>
 #include <limits.h>
 
-#if defined __has_c_attribute || defined __has_cpp_attribute
-#define SHA1DC_ATTR(p) [[p]]
-#else
-#define SHA1DC_ATTR(p)
-#endif
-
-#if defined __GNUC__ && !defined __clang__ && !defined __cplusplus
+#if defined __GNUC__ && !defined __clang__
 # define SHA1DC_FWDPRM_EXTENSION __extension__
 # define SHA1DC_FORWARD_PARAM(p) p;
 # define SHA1DC_FORWARDED(p)     p
@@ -32,27 +20,11 @@ extern "C" {
 # define SHA1DC_FORWARDED(p)
 #endif
 
-#if __STDC_VERSION__ >= 199901L
-# define SHA1DC_STATIC_SIZE static
-#else
-# define SHA1DC_STATIC_SIZE
-#endif
-
-#if __STDC_VERSION__ >= 199901L
-# define SHA1DC_RESTRICT restrict
-#elif defined __GNUC__
-# define SHA1DC_RESTRICT __restrict__
-#elif defined _MSC_VER
-# define SHA1DC_RESTRICT __restrict
-#else
-# define SHA1DC_RESTRICT
-#endif
-
 #if CHAR_BIT != 8
 #error "bytes are not 8 bits on this platform; expect breakage!"
 #endif
 
-// The type of SHA-1 expannded message blocks.
+// The type of SHA-1 expanded message blocks.
 typedef uint32_t sha1_expanded_block[80];
 // The type of SHA-1 hashes, the type of the input and output of the SHA-1
 // compressor, and the type of the compressor's intermediate states.
@@ -69,9 +41,9 @@ typedef void sha1dc_collision_handler(
 // Overall state needed by the library to do SHA-1 hashing and collision
 // detection for one message stream.
 struct sha1dc_ctx {
-  uint64_t bytes;
+  alignas(64) uint32_t buffer[16];
   uint32_t ihv[5];
-  uint32_t buffer[16];
+  uint64_t bytes;
   bool found_collision    : 1;
   bool safe_hash          : 1;
   bool detect_coll        : 1;
@@ -83,8 +55,63 @@ struct sha1dc_ctx {
 
   sha1_chaining_value ihv1, ihv2;
   sha1_expanded_block m1, m2;
-  sha1_chaining_value states[80];
+  sha1_chaining_value states[];
 };
+// Number of states that there must be space for in `struct sha1dc_ctx::states`.
+extern const size_t
+sha1dc_n_needed_states [[gnu::visibility("protected")]];
+inline size_t sha1dc_ctx_size() [[unsequenced]] {
+  return sizeof(struct sha1dc_ctx)
+       + sizeof(sha1_chaining_value) * sha1dc_n_needed_states;
+}
+
+// Description of a class of attacks against SHA-1.
+struct sha1dc_disturbance_vector {
+  // The class, k, and b define the DV. The classification is due to Manuel.
+  enum sha1dc_disturbance_vector_class : unsigned char {
+    sha1dc_disturbance_vector_class_I = 1,
+    sha1dc_disturbance_vector_class_II
+  }             class;
+  unsigned char k, b;
+  // A particular point in the compressor (measured in words consumed), where
+  // the compressor state as a message block is being processed should be saved
+  // in order to be able to definitively check it for signs of being constructed
+  // as prescribed by this DV.
+  unsigned char test_state;
+  uint32_t      message_mask[80];
+};
+// "Easiest" known attack classes
+extern const struct sha1dc_disturbance_vector
+sha1dc_disturbance_vectors [[gnu::visibility("protected")]][];
+// The number of attack classes defended against. The difficulty cutoff thus
+// represented is somewhat arbitrary. This is also the number of elements of
+// `sha1dc_disturbance_vectors`.
+extern const size_t
+sha1dc_n_disturbance_vectors [[gnu::visibility("protected")]];
+
+// The size in `uint8_t`s of a bitmask capable of representing a subset of the
+// `sha1dc_disturbance_vectors`. The bits of the mask correspond to the array
+// elements in little-endian order (`mask[0] & 1` is associated to
+// `sha1dc_disturbance_vectors[0]`, etc.).
+inline size_t sha1dc_dvmask_bytes [[gnu::visibility("protected")]]()
+[[unsequenced]] { return sha1dc_n_disturbance_vectors + 7 >> 3; }
+// Are any DVs specified in the mask? (This is a convenience/optimization; one
+// may directly check the first `sha1dc_n_disturbance_vectors` bits of
+// `dvmask`.)
+bool sha1dc_check_dvmask [[gnu::visibility("protected")]](
+  const uint8_t dvmask[static restrict sha1dc_dvmask_bytes()]) [[unsequenced]];
+// Would be inline (the definition is "public"), but then compilers prefer
+// inlining the function to calling it, when the opposite is better.
+
+// Summary of the `test_state`s of all the `sha1dc_disturbance_vectors`. States
+// (numbered 0 to 80, inclusive) have a nonnegative entry here if any DV needs
+// them, and they have a -1 if they are never needed.
+//
+// The nonnegative number for states that are needed is the number of that state
+// among the needed states. I.e. it is the index for that state into an array of
+// states where the unneeded states do not get array elements.
+extern const signed char
+sha1dc_need_state [[gnu::visibility("protected")]][81];
 
 // Initialize the context with the default library settings and the hash
 // function state that is appropriate for processing a new message from its
@@ -131,28 +158,20 @@ void sha1dc_set_callback(
 // Add some message data to the hash.
 SHA1DC_FWDPRM_EXTENSION void sha1dc_ingest(
   SHA1DC_FORWARD_PARAM(size_t n)
-  struct sha1dc_ctx *SHA1DC_RESTRICT
-, const unsigned char[SHA1DC_FORWARDED(SHA1DC_STATIC_SIZE n)], size_t n);
+  struct sha1dc_ctx *restrict
+, const unsigned char[SHA1DC_FORWARDED(static n)], size_t n);
 
 // Terminate a hash computation and get a 160-bit hash value. This involves
 // computing the appropriate padding and feeding it to the hash, so the state
 // needs to be reinitialized if it is to be reused.
 //
 // Returns whether a collision was detected.
-bool sha1dc_finish SHA1DC_ATTR(gnu::access(write_only, 1))(
-  unsigned char[SHA1DC_STATIC_SIZE 20]
-, struct sha1dc_ctx *SHA1DC_RESTRICT);
-
-#ifdef __cplusplus
-}
-#endif
+bool sha1dc_finish [[gnu::access(write_only, 1)]](
+  unsigned char[static 20]
+, struct sha1dc_ctx *restrict);
 
 #ifndef SHA1DC_KEEP_DEFINES
-#undef SHA1DC_ATTR
 #undef SHA1DC_FWDPRM_EXTENSION
 #undef SHA1DC_FORWARD_PARAM
 #undef SHA1DC_FORWARDED
-#undef SHA1DC_STATIC_SIZE
-#undef SHA1DC_RESTRICT
-#endif
 #endif

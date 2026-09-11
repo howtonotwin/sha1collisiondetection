@@ -18,7 +18,7 @@ LN      ?= ln
 INSTALL ?= install
 
 define DRIVE
-$(DRIVER) -O2 -flto -ffat-lto-objects $(WAY) $(DRIVERFLAGS) \$ 
+$(DRIVER) -O2 -flto $(WAY) $(DRIVERFLAGS) \$ 
 	  
 endef
 define COMPILE.c
@@ -103,5 +103,6 @@ bin/lib%.so: bin/lib%.o
 	$(DRIVE) -shared $^ -o $@ -Wl,-soname,libsha1detectcoll.so.1
 
 $(OBJS_LIB) bin/libsha1detectcoll.o bin/libsha1detectcoll.so: WAY = -fPIC
+bin/libsha1detectcoll.o: WAY += -ffat-lto-objects
 
 -include $(SRCS_LIB.c:%.c=deps/%.make) $(SRCS_EXE.c:%.c=deps/%.make)

@@ -12,78 +12,9 @@
 #include <string.h>
 #include <stdlib.h>
 
-#ifndef SHA1DC_INIT_SAFE_HASH_DEFAULT
-#define SHA1DC_INIT_SAFE_HASH_DEFAULT 1
-#endif
-
-#define SHA1DC_KEEP_DEFINES
+#include "bits.h"
 #include "sha1.h"
-#include "ubc_check.h"
-
-#if (defined(__amd64__) || defined(__amd64) || defined(__x86_64__) || defined(__x86_64) || \
-     defined(i386) || defined(__i386) || defined(__i386__) || defined(__i486__)  || \
-     defined(__i586__) || defined(__i686__) || defined(_M_IX86) || defined(__X86__) || \
-     defined(_X86_) || defined(__THW_INTEL__) || defined(__I86__) || defined(__INTEL__) || \
-     defined(__386) || defined(_M_X64) || defined(_M_AMD64))
-#define SHA1DC_ON_INTEL_LIKE_PROCESSOR
-#endif
-
-#ifndef SHA1DC_ENDIAN
-# ifndef __STDC_ENDIAN_NATIVE__
-#   error "SHA1DC_ENDIAN not defined and __STDC_ENDIAN_NATIVE__ not found..."
-# endif
-# define SHA1DC_ENDIAN __STDC_ENDIAN_NATIVE__
-#endif
-
-#if   defined SHA1DC_ON_INTEL_LIKE_PROCESSOR \
-  && !defined SHA1DC_FORCE_ALIGNED_ACCESS
-# define SHA1DC_ALLOW_UNALIGNED_ACCESS
-#endif
-#ifdef SHA1DC_ALLOW_UNALIGNED_ACCESS
-# define sha1_load8_maybe_unaligned_beu32 sha1_load8_beu32
-#else
-# define sha1_load8_maybe_unaligned_beu32 sha1_load8_aligned_beu32
-#endif
-#if defined SHA1DC_ALLOW_UNALIGNED_ACCESS && defined __GNUC__
-// This has to be a typedef; we can't just conditionally #define something for
-// the attribute. (Clang and GCC use different attribute appertainment rules.)
-typedef __attribute__((aligned(1))) uint32_t uint32_unaligned;
-#else
-// Don't know how to do unaligned access on non-GCC-alikes.
-typedef                             uint32_t uint32_unaligned;
-#endif
-
-#if __STDC_VERSION_STDBIT_H__ >= 202609L
-# define sha1_rotate_left          stdc_rotate_left
-# define sha1_rotate_right         stdc_rotate_right
-# define sha1_load8_aligned_beu32  stdc_load8_aligned_beu32
-# define sha1_store8_aligned_beu32 stdc_store8_aligned_beu32
-# define sha1_load8_beu32          stdc_load8_beu32
-# define sha1_store8_beu32         stdc_store8_beu32
-#else
-static inline uint32_t sha1_rotate_left(uint32_t x, int s) {
-  s &= 31;
-  return x << s | x >> 32 - (s ? s : 32);
-}
-static inline uint32_t sha1_rotate_right(uint32_t x, int s) {
-  return sha1_rotate_left(x, -(s & 31));
-}
-# define sha1_load8_aligned_beu32  sha1_load8_beu32
-# define sha1_store8_aligned_beu64 sha1_store8_beu64
-static inline uint32_t sha1_load8_beu32(
-  const unsigned char p[SHA1DC_STATIC_SIZE 4]) {
-  uint32_t thou = p[0], hund = p[1], tens = p[2], ones = p[3];
-  return thou << 24 | hund << 16 | tens << 8 | ones;
-}
-static inline void sha1_store8_beu64(
-  uint64_t x, unsigned char p[SHA1DC_STATIC_SIZE 8]) {
-  for(char i = 64; (i -= 8) + 8;) *p++ = x >> i;
-}
-static inline void sha1_store8_beu32(
-  uint32_t x, unsigned char p[SHA1DC_STATIC_SIZE 4]) {
-  for(char i = 32; (i -= 8) + 8;) *p++ = x >> i;
-}
-#endif
+#include "core.h"
 
 static inline uint32_t sha1_expand_one(const uint32_t *W) {
   return sha1_rotate_left(W[-3] ^ W[-8] ^ W[-14] ^ W[-16], 1);
@@ -155,8 +86,8 @@ static inline void sha1_step_bw(
 // SHA-1's compression function (including the feed-forward), which takes an
 // expanded message block.
 DECLARE_PLAIN_SHA1(void sha1_add_block)(
-  uint32_t       cv[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]
-, const uint32_t  W[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 80]) {
+  uint32_t       cv[static restrict  5]
+, const uint32_t  W[static restrict 80]) {
   sha1_chaining_value state;
   memcpy(state, cv, sizeof state);
 
@@ -168,8 +99,8 @@ DECLARE_PLAIN_SHA1(void sha1_add_block)(
 // SHA-1's update function, including the message read-in (i.e. endianness
 // handling) and expansion.
 DECLARE_PLAIN_SHA1(void sha1_add_block_expanding)(
-  uint32_t               cv[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]
-, const uint32_unaligned  m[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 16]) {
+  uint32_t                     cv[static restrict  5]
+, const uint32_maybe_unaligned  m[static restrict 16]) {
   sha1_expanded_block W;
   sha1_chaining_value state;
   memcpy(state, cv, sizeof state);
@@ -188,11 +119,11 @@ DECLARE_PLAIN_SHA1(void sha1_add_block_expanding)(
 
 // The same as sha1_add_block_expanding, but saving W and some states.
 DECLARE_PLAIN_SHA1(void sha1_add_block_expanding_saving)(
-  uint32_t               cv[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]
-, const uint32_unaligned  m[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 16]
-, uint32_t                W[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 80]
+  uint32_t                     cv[static restrict  5]
+, const uint32_maybe_unaligned  m[static restrict 16]
+, uint32_t                      W[static restrict 80]
 , sha1_chaining_value  states[
-    SHA1DC_STATIC_SIZE SHA1DC_RESTRICT sha1dc_n_needed_states]) {
+    static restrict sha1dc_n_needed_states]) {
   sha1_chaining_value  state;
   memcpy(state, cv, sizeof state);
   size_t saved = 0;
@@ -220,10 +151,10 @@ DECLARE_PLAIN_SHA1(void sha1_add_block_expanding_saving)(
 // returned beside the output. This may be called a "recompression" function.
 static inline void sha1_add_block_predict [[gnu::always_inline]](
   unsigned char t
-, uint32_t         cv_in[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]
-, uint32_t        cv_out[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]
-, const uint32_t       W[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 80]
-, const uint32_t t_state[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]) {
+, uint32_t         cv_in[static restrict  5]
+, uint32_t        cv_out[static restrict  5]
+, const uint32_t       W[static restrict 80]
+, const uint32_t t_state[static restrict  5]) {
   memcpy(cv_in,  t_state, sizeof(sha1_chaining_value));
   memcpy(cv_out, t_state, sizeof(sha1_chaining_value));
 #pragma GCC unroll 999
@@ -237,10 +168,10 @@ static inline void sha1_add_block_predict [[gnu::always_inline]](
 // We actually want to specialize sha1_add_block_predict on t.
 #define MAKE_SHA1_RECOMPRESS(T) \
   static inline void sha1_recompress_ ## T [[gnu::always_inline]](       \
-    uint32_t             cv_in[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]    \
-  , uint32_t            cv_out[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]    \
-  , const uint32_t           W[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 80]    \
-  , const uint32_t state_ ## T[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]) { \
+    uint32_t             cv_in[static restrict  5]    \
+  , uint32_t            cv_out[static restrict  5]    \
+  , const uint32_t           W[static restrict 80]    \
+  , const uint32_t state_ ## T[static restrict  5]) { \
     sha1_add_block_predict(T, cv_in, cv_out, W, state_ ## T);            \
   }
 // have written myself into a corner
@@ -277,10 +208,10 @@ MAKE_SHA1_RECOMPRESS(78) MAKE_SHA1_RECOMPRESS(79) MAKE_SHA1_RECOMPRESS(80)
 // for certain t and is (supposed to be) faster.
 static void sha1_recompress_at(
   unsigned char t
-, uint32_t        cv_in[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]
-, uint32_t       cv_out[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]
-, const uint32_t      W[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 80]
-, const uint32_t   t_cv[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT  5]) {
+, uint32_t        cv_in[static restrict  5]
+, uint32_t       cv_out[static restrict  5]
+, const uint32_t      W[static restrict 80]
+, const uint32_t   t_cv[static restrict  5]) {
   switch(t) {
 #define USE_SHA1_RECOMPRESS(N) \
     case N:                                          \
@@ -319,9 +250,9 @@ static void sha1_recompress_at(
   }
 }
 
-static void sha1dc_process(
-  struct sha1dc_ctx *SHA1DC_RESTRICT ctx
-, const uint32_t block[SHA1DC_STATIC_SIZE SHA1DC_RESTRICT 16]) {
+void sha1dc_process(
+  struct sha1dc_ctx *restrict ctx
+, const uint32_t block[static restrict 16]) {
   memcpy(ctx->ihv1, ctx->ihv, sizeof ctx->ihv);
   sha1_add_block_expanding_saving(ctx->ihv, block, ctx->m1, ctx->states);
 
@@ -362,89 +293,3 @@ static void sha1dc_process(
   }
 }
 
-void sha1dc_init(struct sha1dc_ctx *ctx) {
-  ctx->bytes = 0;
-  ctx->ihv[0] = 0x67452301;
-  ctx->ihv[1] = 0xEFCDAB89;
-  ctx->ihv[2] = 0x98BADCFE;
-  ctx->ihv[3] = 0x10325476;
-  ctx->ihv[4] = 0xC3D2E1F0;
-  ctx->found_collision = 0;
-  ctx->safe_hash = SHA1DC_INIT_SAFE_HASH_DEFAULT;
-  ctx->ubc_check = 1;
-  ctx->detect_coll = 1;
-  ctx->reduced_round_coll = 0;
-  ctx->collision = NULL;
-}
-
-void sha1dc_set_safe(struct sha1dc_ctx *ctx, bool safe_hash) {
-  ctx->safe_hash = safe_hash;
-}
-void sha1dc_set_use_ubc(struct sha1dc_ctx *ctx, bool ubc_check) {
-  ctx->ubc_check = ubc_check;
-}
-void sha1dc_set_detect_coll(struct sha1dc_ctx *ctx, bool detect_coll) {
-  ctx->detect_coll = detect_coll;
-}
-void sha1dc_set_detect_reduced_round_coll(
-  struct sha1dc_ctx *ctx, bool reduced_round_coll) {
-  ctx->reduced_round_coll = reduced_round_coll;
-}
-
-void sha1dc_set_callback(
-  struct sha1dc_ctx *ctx
-, sha1dc_collision_handler *collision, void *closure) {
-  ctx->collision = collision;
-  ctx->collision_closure = closure;
-}
-
-void sha1dc_ingest(
-  struct sha1dc_ctx *SHA1DC_RESTRICT ctx
-, const unsigned char *buf, size_t n) {
-  if(!n) return;
-
-  unsigned char held = ctx->bytes % sizeof ctx->buffer;
-  unsigned char need = sizeof ctx->buffer - held;
-
-  if(held && n >= need) {
-    ctx->bytes += need;
-    memcpy((char*)ctx->buffer + held, buf, need);
-    sha1dc_process(ctx, ctx->buffer);
-    buf        += need;
-    n          -= need;
-    held        = 0;
-  }
-  while(n >= sizeof ctx->buffer) {
-    ctx->bytes += sizeof ctx->buffer;
-
-#ifdef SHA1DC_ALLOW_UNALIGNED_ACCESS
-    sha1dc_process(ctx, (uint32_t*)buf);
-#else
-    memcpy(ctx->buffer, buf, sizeof ctx->buffer);
-    sha1dc_process(ctx, ctx->buffer);
-#endif
-    buf += sizeof ctx->buffer;
-    n   -= sizeof ctx->buffer;
-  }
-  if(n > 0) {
-    ctx->bytes += n;
-    memcpy((char*)ctx->buffer + held, buf, n);
-  }
-}
-
-static const unsigned char sha1_padding[64] = {1 << 7};
-bool sha1dc_finish(
-  unsigned char output[SHA1DC_STATIC_SIZE 20]
-, struct sha1dc_ctx *SHA1DC_RESTRICT ctx) {
-  uint32_t last = ctx->bytes & 63;
-  uint32_t padn = (last < 56) ? (56 - last) : (120 - last);
-  sha1dc_ingest(ctx, sha1_padding, padn);
-
-  uint64_t bits = 8 * (ctx->bytes - padn);
-  sha1_store8_aligned_beu64(bits, (unsigned char*)(ctx->buffer + 14));
-  sha1dc_process(ctx, ctx->buffer);
-
-  for(size_t i = 0; i < countof ctx->ihv; i++)
-    sha1_store8_beu32(ctx->ihv[i], output + sizeof(uint32_t) * i);
-  return ctx->found_collision;
-}
