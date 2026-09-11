@@ -5,112 +5,57 @@
 ## https://opensource.org/licenses/MIT
 ##
 
-# dynamic library compatibility
-# 1. If the library source code has changed at all since the last update,
-#    then increment revision (‘c:r:a’ becomes ‘c:r+1:a’).
-# 2. If any interfaces have been added, removed, or changed since the last update,
-#    increment current, and set revision to 0.
-# 3. If any interfaces have been added since the last public release, then increment age.
-# 4. If any interfaces have been removed or changed since the last public release,
-#    then set age to 0.
-# Needs bump
 LIBCOMPAT = 1:0:0
 
-PREFIX    ?= /usr/local
-BINDIR     = $(PREFIX)/bin
-LIBDIR     = $(PREFIX)/lib
-INCLUDEDIR = $(PREFIX)/include/sha1dc
+PREFIX     ?= /usr/local
+BINDIR      = $(PREFIX)/bin
+LIBDIR      = $(PREFIX)/lib
+INCLUDEDIR  = $(PREFIX)/include/sha1dc
 
-CC     ?= gcc
-LD     ?= gcc
-AR     ?= gcc-ar
-CC_DEP ?= $(CC)
-
-ifeq ($(shell uname),Darwin)
-LIBTOOL ?= glibtool
+DRIVER  ?= gcc
+AR      ?= gcc-ar
+LN      ?= ln
 INSTALL ?= install
-else
-LIBTOOL ?= libtool
-INSTALL ?= install
-endif
 
-# libtool flatly does not understand partial linking: it cannot take a set of
-# .lo files and produce another .lo file. `libtool --mode=link $CC -o out.lo`
-# will cause libtool to run `ld -r -o out.lo`, which a) uses the wrong driver
-# (plain `ld`, without an LTO plugin, preserves but does not act on LTO data)
-# and b) produces a binary object file for `out.lo`, which means libtool cannot
-# read it back in as a libtool object (since it isn't a libtool object).
-# `libtool --mode=compile $CC in*.lo` also won't work, because libtool won't
-# replace .lo files with their real .o files on a *compiler* command line.
-#
-# But the compiler driver (or at least, GCC) can directly turn multiple .c files
-# into one .o file, with LTO, when -r is passed. This precludes incremental
-# rebuilds, which is annoying, but it is the only thing that works with libtool.
-#
-# So: flag to $CC to produce "an .o file" (relocatable object). This can be -c
-# (which only works when compiling one source file), or -r (which is general).
-RELOC      = -c
-RELOC.LTO  = -r
-CFLAGS     = -O2 -flto -ffat-lto-objects
-CFLAGS    += -std=c2y -Wall -Wextra -Wno-parentheses -pedantic
-CPPFLAGS   = -Ilib
-# no LDFLAGS
+define DRIVE
+$(DRIVER) -O2 -flto -ffat-lto-objects $(WAY) $(DRIVERFLAGS) \$ 
+	  
+endef
+define COMPILE.c
+$(DRIVE) -std=c2y -Iinclude -Wall -Wextra -Wno-parentheses -pedantic \$ 
+	  $(CFLAGS) $(CPPFLAGS) \$ 
+	  -c
+endef
 
-LT_CC      = $(LIBTOOL) --tag=CC --mode=compile $(CC)
-LT_CC_DEP  = $(CC)
-LT_LD      = $(LIBTOOL) --tag=CC --mode=link    $(CC)
-LT_INSTALL = $(LIBTOOL) --tag=CC --mode=install $(INSTALL)
+LIB_DIR = lib
+EXE_DIR = src
 
-ENSUREDIR = @mkdir -p $(@D)
-H_DEP := $(shell find . -type f -name "*.h")
-FS_LIB = $(wildcard $(LIB_DIR)/*.c)
-FS_SRC = $(wildcard $(SRC_DIR)/*.c)
-FS_OBJ_LIB = $(FS_LIB:$(LIB_DIR)/%.c=$(LIB_OBJ_DIR)/%.o)
-FS_OBJ_SRC = $(FS_SRC:$(SRC_DIR)/%.c=$(SRC_OBJ_DIR)/%.$(OBJ_EXT))
-FS_DEP_LIB = $(FS_LIB:$(LIB_DIR)/%.c=$(LIB_DEP_DIR)/%.d)
-FS_DEP_SRC = $(FS_SRC:$(SRC_DIR)/%.c=$(SRC_DEP_DIR)/%.d)
-
-ifneq (, $(shell which $(LIBTOOL) 2>/dev/null ))
-LIB_EXT  = la
-OBJ_EXT  = lo
-override LD := $(LT_LD)
-INSTALL := $(LT_INSTALL)
-else
-LIB_EXT  = a
-OBJ_EXT  = o
-endif
-
-CFLAGS  += $(TARGETCFLAGS)
-LDFLAGS += $(TARGETLDFLAGS)
-
-LIB_DIR     = lib
-LIB_DEP_DIR = dep_lib
-LIB_OBJ_DIR = obj_lib
-SRC_DIR     = src
-SRC_DEP_DIR = dep_src
-SRC_OBJ_DIR = obj_src
+SRCS_LIB.c = $(wildcard $(LIB_DIR)/*.c)
+SRCS_EXE.c = $(wildcard $(EXE_DIR)/*.c)
+OBJS_LIB   = $(SRCS_LIB.c:%.c=obj/%.o)
+OBJS_EXE   = $(SRCS_EXE.c:%.c=obj/%.o)
 
 .PHONY: all
 all: library tools
 
+.PHONY: clean
+clean:
+	rm -rf bin obj deps
+
 .PHONY: install
 install: all
 	$(INSTALL) -d $(LIBDIR) $(BINDIR) $(INCLUDEDIR)
-	$(INSTALL) bin/libsha1detectcoll.$(LIB_EXT) $(LIBDIR)/libsha1detectcoll.$(LIB_EXT)
-	$(INSTALL) lib/sha1.h $(INCLUDEDIR)/sha1.h
-	$(INSTALL) bin/sha1dcsum $(BINDIR)/sha1dcsum
-	$(INSTALL) bin/sha1dcsum_partialcoll $(BINDIR)/sha1dcsum_partialcoll
+	$(INSTALL) bin/libsha1detectcoll.so $(LIBDIR)/
+	$(INSTALL) lib/sha1.h $(INCLUDEDIR)/
+	$(INSTALL) bin/sha1dcsum $(BINDIR)/
+	$(INSTALL) bin/sha1dcsum_partialcoll $(BINDIR)/
 
 .PHONY: uninstall
 uninstall:
 	-$(RM) $(BINDIR)/sha1dcsum
 	-$(RM) $(BINDIR)/sha1dcsum_partialcoll
 	-$(RM) $(INCLUDEDIR)/sha1.h
-	-$(RM) $(LIBDIR)/libsha1detectcoll.$(LIB_EXT)
-
-.PHONY: clean
-clean:
-	rm -rf obj_src dep_src obj_lib dep_lib bin
+	-$(RM) $(LIBDIR)/libsha1detectcoll.so
 
 .PHONY: test
 test: tools
@@ -137,46 +82,26 @@ sha1dcsum: bin/sha1dcsum
 sha1dcsum_partialcoll: bin/sha1dcsum_partialcoll
 
 .PHONY: library
-library: bin/libsha1detectcoll.$(LIB_EXT)
+library: bin/libsha1detectcoll.a bin/libsha1detectcoll.so
 
-bin/sha1dcsum: $(FS_OBJ_SRC) bin/libsha1detectcoll.$(LIB_EXT)
-	$(LD) $(LDFLAGS) $(FS_OBJ_SRC) -Lbin -lsha1detectcoll -o $@
+bin/sha1dcsum: $(OBJS_EXE) bin/libsha1detectcoll.so
+	$(DRIVE) $(LDFLAGS) $(OBJS_EXE) -Lbin -lsha1detectcoll -o $@
+bin/sha1dcsum_partialcoll: bin/sha1dcsum
+	$(LN) -f $< $@
 
-bin/sha1dcsum_partialcoll: $(FS_OBJ_SRC) bin/libsha1detectcoll.$(LIB_EXT)
-	$(LD) $(LDFLAGS) $(FS_OBJ_SRC) -Lbin -lsha1detectcoll -o $@
+obj/%.o: %.c
+	@mkdir -p $(@D) deps/$(*D)
+	$(COMPILE.c) $< -MMD -MT $@ -MF deps/$*.make -o $@
+%.h: ;
 
-COMPILE.c = $(CC) $(CFLAGS) $(CPPFLAGS) $(RELOC)     -o  $@ $(filter %.c,$^)
-DEPS.c    = $(CC) $(CFLAGS) $(CPPFLAGS) -M           -MF $@ $(filter %.c,$^)
-COMPILE.o = $(CC) $(CFLAGS)             $(RELOC.LTO) -o  $@ $(filter %.o,$^)
-
-$(SRC_DEP_DIR)/%.d:  $(SRC_DIR)/%.c
-	$(ENSUREDIR)
-	$(DEPS.c)
-$(SRC_OBJ_DIR)/%.lo: $(SRC_DIR)/%.c $(SRC_DEP_DIR)/%.d $(H_DEP)
-	$(ENSUREDIR)
-	$(let CC,$(LT_CC),$(COMPILE.c))
-$(SRC_OBJ_DIR)/%.o:  $(SRC_DIR)/%.c $(SRC_DEP_DIR)/%.d $(H_DEP)
-	$(ENSUREDIR)
-	$(COMPILE.c)
-
-$(LIB_DEP_DIR)/%.d: $(LIB_DIR)/%.c
-	$(ENSUREDIR)
-	$(DEPS.c)
-$(LIB_OBJ_DIR)/%.o: $(LIB_DIR)/%.c $(LIB_DEP_DIR)/%.d $(H_DEP)
-	$(ENSUREDIR)
-	$(COMPILE.c)
-# see note on libtool above: it does not understand a .lo -> .lo step, so we
-# stick to a single (non-incremental) .c -> .lo step
-bin/libsha1detectcoll.lo: $(FS_LIB) $(H_DEP)
-	$(ENSUREDIR)
-	$(let CC,$(LT_CC),$(let RELOC,$(RELOC.LTO),$(COMPILE.c)))
-bin/libsha1detectcoll.o: $(FS_OBJ_LIB)
-	$(ENSUREDIR)
-	$(COMPILE.o)
-
-bin/libsha1detectcoll.a: bin/libsha1detectcoll.o
+bin/libsha1detectcoll.o: $(OBJS_LIB)
+	@mkdir -p $(@D)
+	$(DRIVE) -r -o $@ $^
+bin/lib%.a: bin/lib%.o
 	$(AR) $(ARFLAGS) $@ $^
-bin/libsha1detectcoll.la: bin/libsha1detectcoll.lo
-	$(LT_LD) $(LDFLAGS) $^ -rpath $(LIBDIR) -version-info $(LIBCOMPAT) -o $@
+bin/lib%.so: bin/lib%.o
+	$(DRIVE) -shared $^ -o $@ -Wl,-soname,libsha1detectcoll.so.1
 
--include $(FS_DEP_SRC) $(FS_DEP_LIB)
+$(OBJS_LIB) bin/libsha1detectcoll.o bin/libsha1detectcoll.so: WAY = -fPIC
+
+-include $(SRCS_LIB.c:%.c=deps/%.make) $(SRCS_EXE.c:%.c=deps/%.make)
