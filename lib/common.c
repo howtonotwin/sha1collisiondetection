@@ -72,8 +72,9 @@ bool sha1dc_finish(
 }
 
 void sha1dc_ingest(
+  size_t n;
   struct sha1dc_ctx *restrict ctx
-, const unsigned char *buf, size_t n) {
+, const unsigned char buf[static n], size_t n) {
   if(!n) return;
 
   unsigned char held = ctx->bytes % sizeof ctx->buffer;

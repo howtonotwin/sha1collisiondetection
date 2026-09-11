@@ -10,16 +10,6 @@
 #include <stdint.h>
 #include <limits.h>
 
-#if defined __GNUC__ && !defined __clang__
-# define SHA1DC_FWDPRM_EXTENSION __extension__
-# define SHA1DC_FORWARD_PARAM(p) p;
-# define SHA1DC_FORWARDED(p)     p
-#else
-# define SHA1DC_FWDPRM_EXTENSION
-# define SHA1DC_FORWARD_PARAM(p)
-# define SHA1DC_FORWARDED(p)
-#endif
-
 #if CHAR_BIT != 8
 #error "bytes are not 8 bits on this platform; expect breakage!"
 #endif
@@ -153,10 +143,10 @@ void sha1dc_set_callback(
   struct sha1dc_ctx*, sha1dc_collision_handler*, void*);
 
 // Add some message data to the hash.
-SHA1DC_FWDPRM_EXTENSION void sha1dc_ingest(
-  SHA1DC_FORWARD_PARAM(size_t n)
+void sha1dc_ingest(
+  size_t n;
   struct sha1dc_ctx *restrict
-, const unsigned char[SHA1DC_FORWARDED(static n)], size_t n);
+, const unsigned char[static n], size_t n);
 
 // Terminate a hash computation and get a 160-bit hash value. This involves
 // computing the appropriate padding and feeding it to the hash, so the state

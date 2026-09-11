@@ -99,8 +99,8 @@ DECLARE_PLAIN_SHA1(void sha1_add_block)(
 // SHA-1's update function, including the message read-in (i.e. endianness
 // handling) and expansion.
 DECLARE_PLAIN_SHA1(void sha1_add_block_expanding)(
-  uint32_t                     cv[static restrict  5]
-, const uint32_maybe_unaligned  m[static restrict 16]) {
+  uint32_t               cv[static restrict  5]
+, const uint32_t UNALIGN  m[static restrict 16]) {
   sha1_expanded_block W;
   sha1_chaining_value state;
   memcpy(state, cv, sizeof state);
@@ -119,11 +119,10 @@ DECLARE_PLAIN_SHA1(void sha1_add_block_expanding)(
 
 // The same as sha1_add_block_expanding, but saving W and some states.
 DECLARE_PLAIN_SHA1(void sha1_add_block_expanding_saving)(
-  uint32_t                     cv[static restrict  5]
-, const uint32_maybe_unaligned  m[static restrict 16]
-, uint32_t                      W[static restrict 80]
-, sha1_chaining_value  states[
-    static restrict sha1dc_n_needed_states]) {
+  uint32_t               cv[static restrict  5]
+, const uint32_t UNALIGN  m[static restrict 16]
+, uint32_t                W[static restrict 80]
+, sha1_chaining_value  states[static restrict sha1dc_n_needed_states]) {
   sha1_chaining_value  state;
   memcpy(state, cv, sizeof state);
   size_t saved = 0;

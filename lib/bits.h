@@ -17,12 +17,10 @@
 #endif
 
 #if SHA1DC_ALLOW_UNALIGNED_ACCESS
-// This has to be a typedef; we can't just conditionally #define something for
-// the attribute. (Clang and GCC use different attribute appertainment rules.)
-typedef __attribute__((aligned(1))) uint32_t uint32_maybe_unaligned;
+# define UNALIGN [[gnu::aligned(1)]]
 # define sha1_load8_maybe_unaligned_beu32 sha1_load8_beu32
 #else
-typedef                             uint32_t uint32_maybe_unaligned;
+# define UNALIGN
 # define sha1_load8_maybe_unaligned_beu32 sha1_load8_aligned_beu32
 #endif
 

@@ -22,7 +22,7 @@ $(DRIVER) -O2 -flto $(WAY) $(DRIVERFLAGS) \$
 	  
 endef
 define COMPILE.c
-$(DRIVE) -std=c2y -Iinclude -Wall -Wextra -Wno-parentheses -pedantic \$ 
+$(DRIVE) -std=gnu2y -Iinclude -Wall -Wextra -Wno-parentheses \$ 
 	  $(CFLAGS) $(CPPFLAGS) \$ 
 	  -c
 endef

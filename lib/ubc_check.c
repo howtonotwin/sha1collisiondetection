@@ -28,12 +28,12 @@
 #   define PARALLEL_ACCUMULATORS 1
 # endif
 #endif
-#define USED_AVX512_FEATURES(X, L) \
+#define USED_AVX512_FEATURES(X) \
   X("avx512f")    \
   X("avx512bw")   \
   X("avx512dq")   \
   X("avx512vl")   \
-  L("avx512vbmi")
+  X("avx512vbmi")
 
 // Headers
 #include <stdbit.h>
@@ -90,25 +90,14 @@ typedef V(16, 32) v16u32;
 #undef sha1dc_ubc_c
 #undef sha1dc_ubc_dvmask
 
-// Now figure out how to enable AVX-512 in a limited region of code.
+// Now set up enabling processor features for delimited regions of code.
 #define PRAGMA_WORDS(...)            _Pragma(# __VA_ARGS__)
 #define STRICT1(M, x)                M(x)
 #define FEATURE_INTO_TARGET(feature) feature ","
-#define IDENTITY1(x)                 x
-#if defined  __clang__
-# define SET_FEATURES(F) \
-    STRICT1(                                                       \
-      PRAGMA_WORDS                                                 \
-    , clang attribute push (                                       \
-        __attribute__((target(F(FEATURE_INTO_TARGET, IDENTITY1)))) \
-      , apply_to=function))
-# define RESET_FEATURES  _Pragma("clang attribute pop")
-#else
-# define SET_FEATURES(F) \
-    _Pragma("GCC push_options") \
-    STRICT1(PRAGMA_WORDS, GCC target F(FEATURE_INTO_TARGET, IDENTITY1))
-# define RESET_FEATURES  _Pragma("GCC pop_options")
-#endif
+#define SET_FEATURES(F) \
+   _Pragma("GCC push_options") \
+   STRICT1(PRAGMA_WORDS, GCC target F(FEATURE_INTO_TARGET))
+#define RESET_FEATURES  _Pragma("GCC pop_options")
 
 // Now code.
 #if !ALWAYS_AVX512
@@ -121,9 +110,6 @@ typedef V(16, 32) v16u32;
 // because the low probability UBCs after the early return are not grouped by
 // DV. (That's one of the features missing from the original.) TODO: make
 // parse_bitrel output fancier data.
-//
-// Fun fact: When given permission, Clang can actually auto-vectorize this and
-// get a maybe ~10% boost in sha1dcsum. But we can do better.
 void sha1dc_ubc_check_baseline(
   uint32_t const W[static restrict 80]
 , uint8_t        dvmask[static restrict sha1dc_dvmask_bytes()]) {
@@ -181,14 +167,10 @@ void sha1dc_ubc_check_baseline(
 // "OR mask vector 16 uint32_t memory"
 static inline v16u32 or_mv16u32_mem [[gnu::always_inline, gnu::artificial]](
   v16u32 dst, __mmask16 k, v16u32 src1, v16u32 const *src2) {
-#if !defined __clang__
   __asm__(
     "vpord" AVX512_ARGS3K(dst, k, src1, src2)
   : [dst]"+v"(dst)
   : [k]"Yk"(k), [src1]"v"(src1), [src2]"m"(*src2));
-#else
-  dst = _mm512_mask_or_epi32(dst, k, src1, *src2);
-#endif
   return dst;
 }
 
@@ -236,9 +218,6 @@ void sha1dc_ubc_check_avx512(
     //     should be no difference in throughput. In context,
     //     PARALLEL_ACCUMULATORS=2 produces a slightly faster (~1-3%, in MB/s)
     //     sha1dcsum. The next few values up have no clear effect.
-    // NB: Clang currently gets a few percent slower at PARALLEL_ACCUMULATORS=2
-    //     instead of a few percent faster. Since Clang's code is horrible
-    //     for other reasons (see below), we don't deal with that right now.
     PARALLEL_ACCUMULATORS]
 #if !UNROLLING_LOOPS
       = {}
@@ -282,27 +261,6 @@ void sha1dc_ubc_check_avx512(
       b2 = _mm512_test_epi8_mask(
         (__m512i)y
       , (__m512i)sha1dc_avx512_v64ubc_ns[i]),
-    // Clang, sillily, pulls the masks from k-regs into GPRs to do the XORs with
-    // ubc_cs and also the shifts that come later. It then pushes the masks (now
-    // 4 times as many) back into k-regs to do the masked ORs (dvmask
-    // accumulation into impossible). This takes so long that this nested loop
-    // is effectively deinterleaved into two loops in series, one evaluating
-    // UBCs and then one accumulating dvmasks. Empirically, a sha1dcsum built
-    // with Clang is ~10% slower than one with GCC (in overall MB/s).
-    //
-    // Interestingly, both in benchmarks and in theory (i.e., in llvm-mca),
-    // Clang's code and GCC's code do have the same throughput, to within ~1
-    // cycle/call. Clang is effectively betting that parallelism between calls
-    // of this function will make up for the intra-call parallelism that it's
-    // destroying. But calls to ubc_check are usually separated by a whole
-    // expansion/compression cycle, so Clang's code remains slow.
-    //
-    // There is probably a way to fix this, just like we do fix up GCC's bad
-    // choices, but this has not been implemented. The simplest idea would be to
-    // replace the "normal" uint64_t load here and the uint64_t shifts later
-    // with the equivalent k-reg intrinsics (like how GCC's tendency to make the
-    // same mistake here is controlled by using _kxor_mask64 and not ^), but
-    // Clang doesn't take the hint.
       ne = _kxor_mask64(
         _kxor_mask64(b1, b2)
       , sha1dc_avx512_v64ubc_cs[i]);
@@ -341,11 +299,6 @@ void sha1dc_ubc_check_avx512(
   // This is rather silly, since those could be the one instruction
   //     vpternlogd  xmmA, xmmA, xmmB, 0b00010001 # "xmmA = ~(xmmA | xmmB)"
   // There's also a pointless mov somewhere in there...
-  //
-  // Clang ends with
-  //     vpxord      xmmC, xmmC, xmmC             # zero xmmC
-  //     vpternlogd  xmmC, xmmA, xmmB, 0b00010001
-  // for both versions of this code. Whether this is a win has not been checked.
   whole_dvmask possible = ~_mm512_reduce_or_epi32((__m512i)*impossible);
 #else
   // If you want something done right, do it yourself!
@@ -381,18 +334,10 @@ RESET_FEATURES
 static typeof(sha1dc_ubc_check) *pick_ubc_check_impl
 [[gnu::no_sanitize("all")]]() {
   typeof(sha1dc_ubc_check) *impl = sha1dc_ubc_check_baseline;
-#   if __GNUC__ >= 8 /* first GCC to check for OS support when needed */ \
-    || __clang_major__ > 3                                               \
-       /* first clang to know the features */                            \
-    || __clang_major__ == 3 &&  __clang_minor__ >= 9
-#     define CHECK_FEATURE_AND(f) __builtin_cpu_supports(f) &&
-#     define CHECK_FEATURE(f)     CHECK_FEATURE_AND(f) true
+#   define CHECK_FEATURE_AND(f) __builtin_cpu_supports(f) &&
   __builtin_cpu_init();
-  if(USED_AVX512_FEATURES(CHECK_FEATURE_AND, CHECK_FEATURE))
+  if(USED_AVX512_FEATURES(CHECK_FEATURE_AND) true)
     impl = sha1dc_ubc_check_avx512;
-#   else
-#     error "Don't know how to check for AVX-512 with this compiler/platform."
-#   endif
   return impl;
 }
 # endif
