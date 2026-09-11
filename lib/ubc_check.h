@@ -23,37 +23,33 @@ struct sha1dc_disturbance_vector {
   uint32_t      message_mask[80];
 };
 // "Easiest" known attack classes
-extern const struct sha1dc_disturbance_vector
-sha1dc_disturbance_vectors [[gnu::visibility("protected")]][];
+extern const struct sha1dc_disturbance_vector sha1dc_disturbance_vectors[];
 // The number of attack classes defended against. The difficulty cutoff thus
 // represented is somewhat arbitrary. This is also the number of elements of
 // `sha1dc_disturbance_vectors`.
-extern const size_t
-sha1dc_n_disturbance_vectors [[gnu::visibility("protected")]];
+extern const size_t sha1dc_n_disturbance_vectors;
 
 // The size in uint8_ts of the mask that ubc_check returns, representing a set
 // of DVs that might have been used to construct a given input. The bits of the
 // dvmask correspond to the `sha1dc_disturbance_vectors`, in little-endian order
 // (`mask[0] & 1` is associated to `sha1dc_disturbance_vectors[0]`, etc.).
-inline size_t sha1dc_dvmask_bytes [[gnu::visibility("protected")]]()
+inline size_t sha1dc_dvmask_bytes()
 [[unsequenced]] {
   return sha1dc_n_disturbance_vectors + 7 >> 3;
 }
 // Are any DVs specified in the mask? (This is a convenience/optimization; one
 // may directly check the first `sha1dc_n_disturbance_vectors` bits of `dvmask`.)
-bool sha1dc_check_dvmask [[gnu::visibility("protected")]](
+bool sha1dc_check_dvmask(
   const uint8_t dvmask[static restrict sha1dc_dvmask_bytes()]) [[unsequenced]];
 // Would be inline (the definition is "public"), but then compilers prefer
 // inlining the function to calling it, when the opposite is better.
 
-extern const size_t
-sha1dc_n_needed_states [[gnu::visibility("protected")]];
+extern const size_t sha1dc_n_needed_states;
 // States marked with -1 are not needed. States marked with a nonnegative number
 // are needed, and that nonnegative number is the number of that state among the
 // needed states (i.e. the index for that state into an array of states where
 // the unneeded states do not get array elements).
-extern const signed char
-sha1dc_need_state [[gnu::visibility("protected")]][81];
+extern const signed char sha1dc_need_state[81];
 
 // Given an expanded SHA-1 message block, test it for signs of having been
 // constructed according to one of the `sha1dc_disturbance_vectors`, and return
