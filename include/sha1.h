@@ -42,18 +42,7 @@ struct sha1dc_ctx {
 
   sha1dc_collision_handler *collision;
   void *collision_closure;
-
-  sha1_chaining_value ihv1, ihv2;
-  sha1_expanded_block m1, m2;
-  sha1_chaining_value states[];
 };
-// Number of states that there must be space for in `struct sha1dc_ctx::states`.
-extern const size_t sha1dc_n_needed_states;
-// Required size of `struct sha1dc_ctx`, including an appropriately sized
-// `states` array.
-extern const size_t sha1dc_ctx_size;
-// =   sizeof(struct sha1dc_ctx)
-//   + sizeof(sha1_chaining_value) * sha1dc_n_needed_states;
 
 // Description of a class of attacks against SHA-1.
 struct sha1dc_disturbance_vector {
@@ -76,28 +65,6 @@ extern const struct sha1dc_disturbance_vector sha1dc_disturbance_vectors[];
 // represented is somewhat arbitrary. This is also the number of elements of
 // `sha1dc_disturbance_vectors`.
 extern const size_t sha1dc_n_disturbance_vectors;
-
-// The size in `uint8_t`s of a bitmask capable of representing a subset of the
-// `sha1dc_disturbance_vectors`. The bits of the mask correspond to the array
-// elements in little-endian order (`mask[0] & 1` is associated to
-// `sha1dc_disturbance_vectors[0]`, etc.).
-extern const size_t sha1dc_dvmask_bytes;
-// = sha1dc_n_disturbance_vectors + 7 >> 3;
-
-// Are any DVs specified in the mask? (This is a convenience/optimization; one
-// may directly check the first `sha1dc_n_disturbance_vectors` bits of
-// `dvmask`.)
-bool sha1dc_check_dvmask(
-  const uint8_t dvmask[static sha1dc_dvmask_bytes]) [[unsequenced]];
-
-// Summary of the `test_state`s of all the `sha1dc_disturbance_vectors`. States
-// (numbered 0 to 80, inclusive) have a nonnegative entry here if any DV needs
-// them, and they have a -1 if they are never needed.
-//
-// The nonnegative number for states that are needed is the number of that state
-// among the needed states. I.e. it is the index for that state into an array of
-// states where the unneeded states do not get array elements.
-extern const signed char sha1dc_need_state[81];
 
 // Initialize the context with the default library settings and the hash
 // function state that is appropriate for processing a new message from its

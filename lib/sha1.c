@@ -132,15 +132,15 @@ void PROT_PLAIN(add_block_expanding_saving)(
   uint32_t               cv[static restrict  5]
 , const uint32_t UNALIGN  m[static restrict 16]
 , uint32_t                W[static restrict 80]
-, sha1_chaining_value  states[static restrict PROTECTED(n_needed_states)]) {
+, sha1_chaining_value  states[static restrict sha1dc_n_needed_states]) {
   sha1_chaining_value  state;
   memcpy(state, cv, sizeof state);
   size_t saved = 0;
 
 #pragma GCC unroll 999
   for(unsigned char i = 0; true; i++) {
-    if(PROTECTED(need_state)[i] != -1) {
-      if((size_t)PROTECTED(need_state)[i] != saved) unreachable();
+    if(sha1dc_need_state[i] != -1) {
+      if((size_t)sha1dc_need_state[i] != saved) unreachable();
       memcpy(states[saved++], state, sizeof state);
     }
     if(i >= 80) break;
@@ -226,7 +226,7 @@ static void sha1_recompress_at(
   switch(t) {
 #define USE_SHA1_RECOMPRESS(N) \
     case N:                                             \
-      if(PROTECTED(need_state)[N] == -1) unreachable(); \
+      if(sha1dc_need_state[N] == -1) unreachable(); \
       sha1_recompress_ ## N(cv_in, cv_out, W, t_cv);    \
       break;
   USE_SHA1_RECOMPRESS( 0) USE_SHA1_RECOMPRESS( 1) USE_SHA1_RECOMPRESS( 2)
@@ -264,40 +264,46 @@ static void sha1_recompress_at(
 void PROTECTED(process)(
   struct sha1dc_ctx *restrict ctx
 , const uint32_t UNALIGN block[static restrict 16]) {
-  memcpy(ctx->ihv1, ctx->ihv, sizeof ctx->ihv);
-  PROT_PLAIN(add_block_expanding_saving)(ctx->ihv, block, ctx->m1, ctx->states);
+  sha1_expanded_block block_W;
+  sha1_chaining_value block_in;
+  sha1_chaining_value block_states[sha1dc_n_needed_states];
+  memcpy(block_in, ctx->ihv, sizeof block_in);
+  PROT_PLAIN(add_block_expanding_saving)(
+    ctx->ihv, block, block_W, block_states);
 
   if(!ctx->detect_coll) return;
 
   uint8_t dvs[PROTECTED(dvmask_bytes)];
-  if(ctx->ubc_check) PROTECTED(ubc_check)(ctx->m1, dvs);
+  if(ctx->ubc_check) PROTECTED(ubc_check)(block_W, dvs);
   else for(size_t i = 0; i < countof dvs; i++) dvs[i] = -1;
 
   if(!PROTECTED(check_dvmask)(dvs)) return;
   for(size_t i = 0; i < PROTECTED(n_disturbance_vectors); i++) {
     if(!(dvs[i / 8] & UINT8_C(1) << i % 8)) continue;
+
+    sha1_expanded_block twin_W;
     for(size_t j = 0; j < 80; j++) {
-      ctx->m2[j] = ctx->m1[j];
-      ctx->m2[j] ^= PROTECTED(disturbance_vectors)[i].message_mask[j];
+      twin_W[j]  = block_W[j];
+      twin_W[j] ^= PROTECTED(disturbance_vectors)[i].message_mask[j];
     }
-    size_t saved = PROTECTED(need_state)[
-      PROTECTED(disturbance_vectors)[i].test_state];
-    if(saved >= PROTECTED(n_needed_states)) unreachable();
 
-    sha1_chaining_value cv_alternate;
+    sha1_chaining_value twin_in, twin_out;
+    size_t twin_saved_step = PROTECTED(disturbance_vectors)[i].test_state;
+    size_t twin_saved_i    = sha1dc_need_state[twin_saved_step];
+    if(twin_saved_i >= sha1dc_n_needed_states) unreachable();
     sha1_recompress_at(
-      PROTECTED(disturbance_vectors)[i].test_state
-    , ctx->ihv2, cv_alternate
-    , ctx->m2, ctx->states[saved]);
+      twin_saved_step
+    , twin_in, twin_out
+    , twin_W, block_states[twin_saved_i]);
 
-    if(!memcmp(cv_alternate, ctx->ihv, sizeof ctx->ihv)
+    if(!memcmp(twin_out, ctx->ihv, sizeof ctx->ihv)
     ||    ctx->reduced_round_coll
-       && !memcmp(ctx->ihv2, ctx->ihv1, sizeof ctx->ihv1)) {
+       && !memcmp(twin_in, block_in, sizeof block_in)) {
       ctx->found_collision = 1;
 
       if (ctx->safe_hash) {
-        PROT_PLAIN(add_block)(ctx->ihv, ctx->m1);
-        PROT_PLAIN(add_block)(ctx->ihv, ctx->m1);
+        PROT_PLAIN(add_block)(ctx->ihv, block_W);
+        PROT_PLAIN(add_block)(ctx->ihv, block_W);
       }
 
       break;

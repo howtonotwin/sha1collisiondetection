@@ -2,6 +2,22 @@
 #include "bits.h"
 #include "sha1.h"
 
+// The size in `uint8_t`s of a bitmask capable of representing a subset of the
+// `sha1dc_disturbance_vectors`. The bits of the mask correspond to the array
+// elements in little-endian order (`mask[0] & 1` is associated to
+// `sha1dc_disturbance_vectors[0]`, etc.).
+extern const size_t sha1dc_dvmask_bytes;
+// = sha1dc_n_disturbance_vectors + 7 >> 3;
+
+// Are any DVs specified in the mask?
+//
+// This is a convenience/optimization; one may directly check the first
+// `sha1dc_n_disturbance_vectors` bits of `dvmask`. (Actually, if/while this is
+// library internal, LTO will take care of the optimization part. But it would
+// be useful for library consumers if it were exposed.)
+bool sha1dc_check_dvmask(
+  const uint8_t dvmask[static sha1dc_dvmask_bytes]) [[unsequenced]];
+
 // Accumulate a raw message block into the context.
 void sha1dc_process(
   struct sha1dc_ctx *restrict ctx

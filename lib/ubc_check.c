@@ -74,8 +74,6 @@ typedef V(16, 32) v16u32;
 #define sha1dc_ubc_dvmask dvmask
 #define sha1dc_disturbance_vectors   PROTECTED(disturbance_vectors)
 #define sha1dc_n_disturbance_vectors PROTECTED(n_disturbance_vectors)
-#define sha1dc_n_needed_states       PROTECTED(n_needed_states)
-#define sha1dc_need_state            PROTECTED(need_state)
 #include "ubc_check.inc"
 #undef sha1dc_disturbance_vectors
 #undef sha1dc_n_disturbance_vectors
@@ -94,8 +92,6 @@ typedef V(16, 32) v16u32;
 #undef sha1dc_ubc_dvmask
 extern EXPORT_PROTECTED(disturbance_vectors);
 extern EXPORT_PROTECTED(n_disturbance_vectors);
-extern EXPORT_PROTECTED(n_needed_states);
-extern EXPORT_PROTECTED(need_state);
 
 // Now set up enabling processor features for delimited regions of code.
 #define PRAGMA_WORDS(...)            _Pragma(# __VA_ARGS__)
@@ -109,10 +105,6 @@ extern EXPORT_PROTECTED(need_state);
 const size_t PROTECTED(dvmask_bytes) =
   countof PROTECTED(disturbance_vectors) + 7 >> 3;
 extern EXPORT_PROTECTED(dvmask_bytes);
-const size_t PROTECTED(ctx_size) =
-    sizeof(struct sha1dc_ctx)
-  + sizeof(sha1_chaining_value) * PROTECTED(n_needed_states);
-extern EXPORT_PROTECTED(ctx_size);
 
 #if !ALWAYS_AVX512
 // This, is roughly equivalent to the one from 2017 due to the (forced) total

@@ -41,8 +41,7 @@ int main(int argc, char** argv)
   unsigned char hash2[20];
   char buffer[65536];
   size_t size;
-  alignas(struct sha1dc_ctx) char storage[sha1dc_ctx_size];
-#define ctx 0[(struct sha1dc_ctx*)storage]
+  struct sha1dc_ctx ctx;
   int i,j,foundcollision;
 
   if (argc < 2)
