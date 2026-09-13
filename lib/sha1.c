@@ -174,6 +174,7 @@ static inline void PROT_PLAIN(add_block_predict) [[gnu::always_inline]](
   for(size_t i = 0; i < countof(sha1_chaining_value); i++)
     cv_out[i] += cv_in[i];
 }
+// TODO: exporting this blows up compile time and possibly produces slower code?
 // MAYBE_EXPORT_PLAIN(add_block_predict);
 
 // We actually want to specialize sha1_add_block_predict on t.
