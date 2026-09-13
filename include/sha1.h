@@ -21,7 +21,10 @@ typedef uint32_t sha1_expanded_block[80];
 typedef uint32_t sha1_chaining_value[5];
 // A callback for handling collision blocks when they are found.
 typedef void sha1dc_collision_handler(
-  void *closure, uint64_t byte_offset
+  void *closure
+, // Points past the end of the colliding blocks. In other words, the length of
+  // the colliding prefix of the message stream.
+  uint64_t byte_offset
 , const sha1_chaining_value in_1, const sha1_chaining_value in_2
 , const sha1_expanded_block mb_1, const sha1_expanded_block mb_2);
 

@@ -62,9 +62,12 @@ bool sha1dc_finish(
   uint32_t last = ctx->bytes & 63;
   uint32_t padn = last < 56 ? 56 - last : 120 - last;
   sha1dc_ingest(ctx, sha1_padding, padn);
-  // NB: ctx->buffer holds exactly 56 bytes at this point
+  if(ctx->bytes & 63 != 56) unreachable();
 
   sha1_store8_aligned_beu64(bits, (unsigned char*)(ctx->buffer + 14));
+  // sha1dc_process uses ctx->bytes if it finds a collision, so make sure to
+  // keep it updated just as sha1dc_ingest does.
+  ctx->bytes += 8;
   PROTECTED(process)(ctx, ctx->buffer);
 
   for(size_t i = 0; i < countof ctx->ihv; i++)

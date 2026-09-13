@@ -301,6 +301,11 @@ void PROTECTED(process)(
        && !memcmp(twin_in, block_in, sizeof block_in)) {
       ctx->found_collision = 1;
 
+      if(ctx->collision)
+        ctx->collision(
+          ctx->collision_closure, ctx->bytes
+        , block_in, twin_in, block_W, twin_W);
+
       if (ctx->safe_hash) {
         PROT_PLAIN(add_block)(ctx->ihv, block_W);
         PROT_PLAIN(add_block)(ctx->ihv, block_W);
