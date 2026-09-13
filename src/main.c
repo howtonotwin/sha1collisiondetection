@@ -5,6 +5,7 @@
 * https://opensource.org/licenses/MIT
 ***/
 
+#include <stdcountof.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,100 +17,65 @@
 #include "sha1.h"
 
 #ifdef _WIN32
-char* basename(char* path)
-{
-    char *base = NULL, *cur = NULL;
-
-    base = path;
-    cur = path;
-    while (0 != *cur)
-    {
-        if ('\\' == *cur)
-        {
-            base = cur + 1;
-        }
-        cur++;
-    }
-
-    return base;
+char *basename(const char *path) {
+  const char *base = path;
+  for(const char *cur = path; *cur;) {
+    if(*cur == '\\') base = ++cur;
+    else             cur++;
+  }
+  return (char*)base;
 }
 #endif
 
-int main(int argc, char** argv)
-{
-  FILE* fd;
-  unsigned char hash2[20];
-  char buffer[65536];
-  size_t size;
-  struct sha1dc_ctx ctx;
-  int i,j,foundcollision;
+static unsigned char buffer[65536];
+int main(int, char **argv) {
+  const char *self = argv[0] ? basename(argv[0]) : "sha1dcsum";
+  const char *const *files =
+      argv[0] && argv[1]
+    ? (typeof(files))(argv + 1)
+    : (static const char *const[]) { "-", nullptr };
 
-  if (argc < 2)
-  {
-    fprintf(stderr, "Usage: %s <file>\n", basename(argv[0]));
-    return 1;
-  }
-
-  for (i=1; i < argc; ++i)
-  {
+  bool any_error = false, all_error = true;
+  for(; *files; files++) {
+    struct sha1dc_ctx ctx;
     sha1dc_init(&ctx);
 
-    /* if the program name includes the word 'partial' then also test for reduced-round SHA-1 collisions */
-    if (NULL != strstr(argv[0], "partial"))
-    {
-      sha1dc_set_detect_reduced_round_coll(&ctx, 1);
-    }
+    // If the program name includes the word "partial", then also test for
+    // reduced-round SHA-1 collisions
+    sha1dc_set_detect_reduced_round_coll(&ctx, strstr(self, "partial"));
 
-    if(!strcmp(argv[i],"-")) {
-      fd = stdin;
-    } else {
-      fd = fopen(argv[i], "rb");
-    }
-    if (fd == NULL)
-    {
-      fprintf(stderr, "cannot open file: %s: %s\n", argv[i], strerror(errno));
+    FILE *f = strcmp(*files, "-") ? fopen(*files, "rb") : stdin;
+    if(!f) {
+      fprintf(
+        stderr, "%s: cannot open file '%s': %s\n"
+      , self, *files, strerror(errno));
       return 1;
     }
 
-    while (1)
-    {
-      size=fread(buffer,1,65536,fd);
-      sha1dc_ingest(&ctx, (unsigned char*)buffer, size);
-      if (size != 65536)
-        break;
+    for(size_t read; read = fread(buffer, 1, sizeof buffer, f);) {
+      sha1dc_ingest(&ctx, buffer, read);
+      if(read != sizeof buffer) break;
     }
-    if (ferror(fd))
-    {
-      fprintf(stderr, "error while reading file: %s: %s\n", argv[i], strerror(errno));
-      return 1;
-    }
-    if (!feof(fd))
-    {
-      fprintf(stderr, "not end of file?: %s: %s\n", argv[i], strerror(errno));
-      return 1;
-    }
+    if(ferror(f)) {
+      fprintf(
+        stderr, "%s: error while reading file '%s': %s\n"
+      , self, *files, strerror(errno));
+      any_error = true;
+      continue;
+    } else if(!feof(f)) abort();
+    all_error = false;
 
-    foundcollision = sha1dc_finish(hash2,&ctx);
+    unsigned char hash[sizeof(sha1_chaining_value)];
+    bool collision = sha1dc_finish(hash, &ctx);
+    for(size_t i = 0; i < countof hash; i++) printf("%02x", hash[i]);
+    fputs(
+        collision
+      ? " *coll* "
+      : "        "
+    , stdout);
+    puts(*files);
 
-    for (j = 0; j < 20; ++j)
-    {
-      sprintf(buffer+(j*2), "%02x", hash2[j]);
-    }
-    buffer[20*2] = 0;
-    if (foundcollision)
-    {
-      printf("%s *coll* %s\n", buffer, argv[i]);
-    }
-    else
-    {
-      printf("%s  %s\n", buffer, argv[i]);
-    }
-
-    fclose(fd);
+    fclose(f);
   }
-  return 0;
+  return any_error + 2 * all_error;
 }
-
-#ifdef _MSC_VER
-#pragma warning(disable : 4710 )    /* 4710 -- compiler complains about printf,sprintf not being inlined. */
-#endif

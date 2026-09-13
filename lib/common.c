@@ -55,7 +55,7 @@ void sha1dc_set_callback(
 
 static const unsigned char sha1_padding[64] = {0b1000'0000};
 bool sha1dc_finish(
-  unsigned char output[static 20]
+  unsigned char output[static sizeof(sha1_chaining_value)]
 , struct sha1dc_ctx *restrict ctx) {
   uint64_t bits = 8 * ctx->bytes;
   // Padding + uint64_t bit count must take us to a whole number of blocks
@@ -71,7 +71,7 @@ bool sha1dc_finish(
   PROTECTED(process)(ctx, ctx->buffer);
 
   for(size_t i = 0; i < countof ctx->ihv; i++)
-    sha1_store8_beu32(ctx->ihv[i], output + sizeof(uint32_t) * i);
+    sha1_store8_beu32(ctx->ihv[i], output + sizeof *ctx->ihv * i);
   return ctx->found_collision;
 }
 

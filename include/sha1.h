@@ -130,5 +130,5 @@ void sha1dc_ingest(
 //
 // Returns whether a collision was detected.
 bool sha1dc_finish [[gnu::access(write_only, 1)]](
-  unsigned char[static 20]
+  unsigned char[static sizeof(sha1_chaining_value)]
 , struct sha1dc_ctx *restrict);
