@@ -36,7 +36,6 @@
   X("avx512vbmi")
 
 // Headers
-#include <stdbit.h>
 #include <stdcountof.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -46,8 +45,8 @@
 # include <immintrin.h>
 #endif
 
-#include "sha1.h"
-#include "core.h"
+#include "sha1_private.h"
+#include "core_private.h"
 
 // Consuming the output of parse_bitrel (and renaming things)
 typedef bool bit;
@@ -73,6 +72,10 @@ typedef V(16, 32) v16u32;
 #define sha1dc_ubc_j      j
 #define sha1dc_ubc_c      c
 #define sha1dc_ubc_dvmask dvmask
+#define sha1dc_disturbance_vectors   PROTECTED(disturbance_vectors)
+#define sha1dc_n_disturbance_vectors PROTECTED(n_disturbance_vectors)
+#define sha1dc_n_needed_states       PROTECTED(n_needed_states)
+#define sha1dc_need_state            PROTECTED(need_state)
 #include "ubc_check.inc"
 #undef sha1dc_disturbance_vectors
 #undef sha1dc_n_disturbance_vectors
@@ -89,10 +92,13 @@ typedef V(16, 32) v16u32;
 #undef sha1dc_ubc_j
 #undef sha1dc_ubc_c
 #undef sha1dc_ubc_dvmask
+extern EXPORT_PROTECTED(disturbance_vectors);
+extern EXPORT_PROTECTED(n_disturbance_vectors);
+extern EXPORT_PROTECTED(n_needed_states);
+extern EXPORT_PROTECTED(need_state);
 
 // Now set up enabling processor features for delimited regions of code.
 #define PRAGMA_WORDS(...)            _Pragma(# __VA_ARGS__)
-#define STRICT1(M, x)                M(x)
 #define FEATURE_INTO_TARGET(feature) feature ","
 #define SET_FEATURES(F) \
    _Pragma("GCC push_options") \
@@ -100,6 +106,14 @@ typedef V(16, 32) v16u32;
 #define RESET_FEATURES  _Pragma("GCC pop_options")
 
 // Now code.
+const size_t PROTECTED(dvmask_bytes) =
+  countof PROTECTED(disturbance_vectors) + 7 >> 3;
+extern EXPORT_PROTECTED(dvmask_bytes);
+const size_t PROTECTED(ctx_size) =
+    sizeof(struct sha1dc_ctx)
+  + sizeof(sha1_chaining_value) * PROTECTED(n_needed_states);
+extern EXPORT_PROTECTED(ctx_size);
+
 #if !ALWAYS_AVX512
 // This, is roughly equivalent to the one from 2017 due to the (forced) total
 // unrolling and then the ensuing constant propagation. Actually, this one is
@@ -110,17 +124,17 @@ typedef V(16, 32) v16u32;
 // because the low probability UBCs after the early return are not grouped by
 // DV. (That's one of the features missing from the original.) TODO: make
 // parse_bitrel output fancier data.
-void sha1dc_ubc_check_baseline(
+void PROTECTED(ubc_check_baseline)(
   uint32_t const W[static restrict 80]
-, uint8_t        dvmask[static restrict sha1dc_dvmask_bytes()]) {
+, uint8_t        dvmask[static restrict PROTECTED(dvmask_bytes)]) {
   typedef uint32_t whole_dvmask;
-  if(sha1dc_dvmask_bytes() > sizeof(whole_dvmask)) abort();
+  if(PROTECTED(dvmask_bytes) > sizeof(whole_dvmask)) abort();
   whole_dvmask possible = -1;
 #pragma GCC unroll 999
   for(size_t i = 0; i < countof sha1dc_ubcs; i++) {
     auto ubc = sha1dc_ubcs[i];
     whole_dvmask dvs = {};
-    memcpy(&dvs, ubc.dvmask, sha1dc_dvmask_bytes());
+    memcpy(&dvs, ubc.dvmask, PROTECTED(dvmask_bytes));
 
     char
       common = ubc.i <= ubc.j ? ubc.i : ubc.j,
@@ -136,12 +150,13 @@ void sha1dc_ubc_check_baseline(
     possible &= eq | ~dvs;
     if(i == 64 && !possible) break;
   }
-  memcpy(dvmask, &possible, sha1dc_dvmask_bytes());
+  memcpy(dvmask, &possible, PROTECTED(dvmask_bytes));
 }
+EXPORT_PROTECTED(ubc_check_baseline);
 #endif
 
 #if ENABLE_AVX512
-  SET_FEATURES(USED_AVX512_FEATURES)
+SET_FEATURES(USED_AVX512_FEATURES)
 
   // Format given inline-asm named operands for use in an x86 assembly template.
 # define AVX512_ARGS3K(dst, k, src1, src2) \
@@ -174,9 +189,9 @@ static inline v16u32 or_mv16u32_mem [[gnu::always_inline, gnu::artificial]](
   return dst;
 }
 
-void sha1dc_ubc_check_avx512(
+void PROTECTED(ubc_check_avx512)(
   uint32_t const W[static restrict 80]
-, uint8_t        out[static restrict sha1dc_dvmask_bytes()]) {
+, uint8_t        out[static restrict PROTECTED(dvmask_bytes)]) {
   v64u8
     w1 = (typeof(w1))_mm512_loadu_epi8(
       &W[sha1dc_avx512_bias]),
@@ -189,6 +204,7 @@ void sha1dc_ubc_check_avx512(
   // the intrinsic functions have the width in their names), but it is heavily
   // typed to hopefully make it clear what choices depend on what.)
   typedef typeof_unqual(sha1dc_avx512_v64ubc_dvmasks[0][0][0]) whole_dvmask;
+  if(PROTECTED(dvmask_bytes) > sizeof(whole_dvmask)) abort();
   // Accumulator(s) (under OR) for the dvmasks of UBCs that fail.
   //
   // Each incoming mask will go to one of the lanes essentially arbitrarily, so
@@ -326,34 +342,33 @@ void sha1dc_ubc_check_avx512(
       , ~(_MM_TERNLOG_B | _MM_TERNLOG_C))
     [0];
 #endif
-  memcpy(out, &possible, sha1dc_dvmask_bytes());
+  memcpy(out, &possible, PROTECTED(dvmask_bytes));
 }
+EXPORT_PROTECTED(ubc_check_avx512);
 RESET_FEATURES
 
 # if !ALWAYS_AVX512
-static typeof(sha1dc_ubc_check) *pick_ubc_check_impl
+static typeof(PROTECTED(ubc_check)) *pick_ubc_check_impl
 [[gnu::no_sanitize("all")]]() {
-  typeof(sha1dc_ubc_check) *impl = sha1dc_ubc_check_baseline;
+  typeof(PROTECTED(ubc_check)) *impl = PROTECTED(ubc_check_baseline);
 #   define CHECK_FEATURE_AND(f) __builtin_cpu_supports(f) &&
   __builtin_cpu_init();
   if(USED_AVX512_FEATURES(CHECK_FEATURE_AND) true)
-    impl = sha1dc_ubc_check_avx512;
+    impl = PROTECTED(ubc_check_avx512);
   return impl;
 }
 # endif
 #endif
 
 // TODO: non-ifunc dispatch, for non-GNU/ELF
-void sha1dc_ubc_check
 #if ENABLE_AVX512 && !ALWAYS_AVX512
-  [[gnu::ifunc("pick_ubc_check_impl")]]
-#endif
-( uint32_t const W[static restrict 80]
-, uint8_t        dvmask[static restrict sha1dc_dvmask_bytes()])
-#if ENABLE_AVX512 && !ALWAYS_AVX512
-;
+typeof(sha1dc_ubc_check)
+  PROTECTED(ubc_check) [[gnu::ifunc("pick_ubc_check_impl")]],
+  sha1dc_ubc_check     [[gnu::ifunc("pick_ubc_check_impl")]];
 #else
-{
+void PROTECTED(ubc_check)(
+  uint32_t const W[static restrict 80]
+, uint8_t        dvmask[static restrict PROTECTED(dvmask_bytes)]) {
 # if ALWAYS_AVX512
     sha1dc_ubc_check_avx512
 # else
@@ -361,23 +376,17 @@ void sha1dc_ubc_check
 # endif
   (W, dvmask);
 }
+EXPORT_PROTECTED(ubc_check);
 #endif
 
-extern inline size_t sha1dc_dvmask_bytes();
-bool sha1dc_check_dvmask [[gnu::visibility("protected")]](
-  const uint8_t dvmask[static restrict sha1dc_dvmask_bytes()]) {
+bool PROTECTED(check_dvmask)(
+  const uint8_t dvmask[static PROTECTED(dvmask_bytes)]) {
   uint32_t buf;
-  for(size_t i = 0; i < sha1dc_dvmask_bytes(); i += sizeof buf) {
-    memcpy(&buf, dvmask, sizeof buf);
+  for(size_t i = 0; i < PROTECTED(dvmask_bytes); i += sizeof buf) {
+    size_t left = PROTECTED(dvmask_bytes) - i;
+    memcpy(&buf, dvmask, left < sizeof buf ? left : sizeof buf);
     if(buf) return true;
   }
   return false;
 }
-
-inline size_t sha1dc_dvmask_bytes [[gnu::visibility("protected")]]();
-extern const struct sha1dc_disturbance_vector
-  sha1dc_disturbance_vectors [[gnu::visibility("protected")]][];
-extern const size_t
-  sha1dc_n_disturbance_vectors [[gnu::visibility("protected")]];
-extern const size_t sha1dc_n_needed_states [[gnu::visibility("protected")]];
-extern const signed char sha1dc_need_state [[gnu::visibility("protected")]][];
+EXPORT_PROTECTED(check_dvmask);

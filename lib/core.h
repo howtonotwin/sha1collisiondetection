@@ -1,12 +1,13 @@
 #pragma once
+#include "bits.h"
 #include "sha1.h"
 
 // Accumulate a raw message block into the context.
 void sha1dc_process(
   struct sha1dc_ctx *restrict ctx
-, const uint32_t    block[static restrict 16]);
-// NB: it *is* allowed to pass `ctx->buffer` for `block`, because neither `*ctx`
-// nor `ctx->buffer` nor any element of `ctx->buffer` are accessed.
+, const uint32_t UNALIGN block[static restrict 16]);
+// NB: `ctx->buffer` is not modified by this function, so it *is* allowed to
+//     pass `ctx->buffer` for `block`.
 
 // Given an expanded SHA-1 message block, test it for signs of having been
 // constructed according to one of the `sha1dc_disturbance_vectors`, and return
@@ -16,4 +17,4 @@ void sha1dc_process(
 // On random (non-malicious) data, the false positive rate is about 4.7%.
 void sha1dc_ubc_check [[gnu::access(write_only, 2)]](
   uint32_t const expanded_message[static restrict 80]
-, uint8_t        dvmask[static restrict sha1dc_dvmask_bytes()]) [[unsequenced]];
+, uint8_t        dvmask[static restrict sha1dc_dvmask_bytes]) [[unsequenced]];

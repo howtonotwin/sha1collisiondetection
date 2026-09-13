@@ -9,7 +9,7 @@
 #include <string.h>
 
 #include "bits.h"
-#include "core.h"
+#include "core_private.h"
 
 #include "sha1.h"
 
@@ -53,18 +53,19 @@ void sha1dc_set_callback(
   ctx->collision_closure = closure;
 }
 
-static const unsigned char sha1_padding[64] = {1 << 7};
+static const unsigned char sha1_padding[64] = {0b1000'0000};
 bool sha1dc_finish(
   unsigned char output[static 20]
 , struct sha1dc_ctx *restrict ctx) {
   uint64_t bits = 8 * ctx->bytes;
+  // Padding + uint64_t bit count must take us to a whole number of blocks
   uint32_t last = ctx->bytes & 63;
-  uint32_t padn = (last < 56) ? (56 - last) : (120 - last);
+  uint32_t padn = last < 56 ? 56 - last : 120 - last;
   sha1dc_ingest(ctx, sha1_padding, padn);
   // NB: ctx->buffer holds exactly 56 bytes at this point
 
   sha1_store8_aligned_beu64(bits, (unsigned char*)(ctx->buffer + 14));
-  sha1dc_process(ctx, ctx->buffer);
+  PROTECTED(process)(ctx, ctx->buffer);
 
   for(size_t i = 0; i < countof ctx->ihv; i++)
     sha1_store8_beu32(ctx->ihv[i], output + sizeof(uint32_t) * i);
@@ -83,7 +84,7 @@ void sha1dc_ingest(
   if(held && n >= need) {
     ctx->bytes += need;
     memcpy((char*)ctx->buffer + held, buf, need);
-    sha1dc_process(ctx, ctx->buffer);
+    PROTECTED(process)(ctx, ctx->buffer);
     buf        += need;
     n          -= need;
     held        = 0;
@@ -91,11 +92,11 @@ void sha1dc_ingest(
   while(n >= sizeof ctx->buffer) {
     ctx->bytes += sizeof ctx->buffer;
 
-#ifdef SHA1DC_ALLOW_UNALIGNED_ACCESS
-    sha1dc_process(ctx, (uint32_maybe_unaligned*)buf);
+#if ALLOW_UNALIGNED_ACCESS
+    PROTECTED(process)(ctx, (const uint32_t UNALIGN*)buf);
 #else
     memcpy(ctx->buffer, buf, sizeof ctx->buffer);
-    sha1dc_process(ctx, ctx->buffer);
+    PROTECTED(process)(ctx, ctx->buffer);
 #endif
     buf += sizeof ctx->buffer;
     n   -= sizeof ctx->buffer;

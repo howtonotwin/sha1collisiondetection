@@ -13,8 +13,8 @@
 #include <stdlib.h>
 
 #include "bits.h"
-#include "sha1.h"
-#include "core.h"
+#include "core_private.h"
+#include "sha1_private.h"
 
 static inline uint32_t sha1_expand_one(const uint32_t *W) {
   return sha1_rotate_left(W[-3] ^ W[-8] ^ W[-14] ^ W[-16], 1);
@@ -77,15 +77,22 @@ static inline void sha1_step_bw(
   sha1_E(cv) = q;
 }
 
-#ifdef SHA1DC_EXPORT_PLAIN_SHA1
-# define DECLARE_PLAIN_SHA1(D) D [[gnu::visibility("protected")]]
+#define PROT_PLAIN(sym) sha1_ ## sym ## _
+#ifdef ENABLE_PLAIN_SHA1
+# define MAYBE_EXPORT_PLAIN(sym) \
+    typeof(PROT_PLAIN(sym))                                             \
+      PROT_PLAIN(sym) [[gnu::visibility("hidden")]],                    \
+      sha1_ ## sym [[gnu::alias(STRICT1(STRINGIFY, PROT_PLAIN(sym)))]]; \
+    static_assert(true)
 #else
-# define DECLARE_PLAIN_SHA1(D) static D [[maybe_unused]]
+# define MAYBE_EXPORT_PLAIN(sym) \
+    typeof(PROT_PLAIN(sym)) PROT_PLAIN(sym) [[gnu::visibility("hidden")]]; \
+    static_assert(true)
 #endif
 
 // SHA-1's compression function (including the feed-forward), which takes an
 // expanded message block.
-DECLARE_PLAIN_SHA1(void sha1_add_block)(
+void PROT_PLAIN(add_block)(
   uint32_t       cv[static restrict  5]
 , const uint32_t  W[static restrict 80]) {
   sha1_chaining_value state;
@@ -96,9 +103,11 @@ DECLARE_PLAIN_SHA1(void sha1_add_block)(
 
   for(size_t i = 0; i < countof state; i++) cv[i] += state[i];
 }
+MAYBE_EXPORT_PLAIN(add_block);
+
 // SHA-1's update function, including the message read-in (i.e. endianness
 // handling) and expansion.
-DECLARE_PLAIN_SHA1(void sha1_add_block_expanding)(
+void PROT_PLAIN(add_block_expanding)(
   uint32_t               cv[static restrict  5]
 , const uint32_t UNALIGN  m[static restrict 16]) {
   sha1_expanded_block W;
@@ -116,21 +125,22 @@ DECLARE_PLAIN_SHA1(void sha1_add_block_expanding)(
 
   for(size_t i = 0; i < countof state; i++) cv[i] += state[i];
 }
+MAYBE_EXPORT_PLAIN(add_block_expanding);
 
 // The same as sha1_add_block_expanding, but saving W and some states.
-DECLARE_PLAIN_SHA1(void sha1_add_block_expanding_saving)(
+void PROT_PLAIN(add_block_expanding_saving)(
   uint32_t               cv[static restrict  5]
 , const uint32_t UNALIGN  m[static restrict 16]
 , uint32_t                W[static restrict 80]
-, sha1_chaining_value  states[static restrict sha1dc_n_needed_states]) {
+, sha1_chaining_value  states[static restrict PROTECTED(n_needed_states)]) {
   sha1_chaining_value  state;
   memcpy(state, cv, sizeof state);
   size_t saved = 0;
 
 #pragma GCC unroll 999
   for(unsigned char i = 0; true; i++) {
-    if(sha1dc_need_state[i] != -1) {
-      if((size_t)sha1dc_need_state[i] != saved) unreachable();
+    if(PROTECTED(need_state)[i] != -1) {
+      if((size_t)PROTECTED(need_state)[i] != saved) unreachable();
       memcpy(states[saved++], state, sizeof state);
     }
     if(i >= 80) break;
@@ -144,11 +154,12 @@ DECLARE_PLAIN_SHA1(void sha1_add_block_expanding_saving)(
 
   for(size_t i = 0; i < countof state; i++) cv[i] += state[i];
 }
+MAYBE_EXPORT_PLAIN(add_block_expanding_saving);
 
 // Similar to sha1_add_block, but the caller supplies not the first state but
 // the state after `t` words (!!!). The "input"/first state is reconstructed and
 // returned beside the output. This may be called a "recompression" function.
-static inline void sha1_add_block_predict [[gnu::always_inline]](
+static inline void PROT_PLAIN(add_block_predict) [[gnu::always_inline]](
   unsigned char t
 , uint32_t         cv_in[static restrict  5]
 , uint32_t        cv_out[static restrict  5]
@@ -163,15 +174,16 @@ static inline void sha1_add_block_predict [[gnu::always_inline]](
   for(size_t i = 0; i < countof(sha1_chaining_value); i++)
     cv_out[i] += cv_in[i];
 }
+// MAYBE_EXPORT_PLAIN(add_block_predict);
 
 // We actually want to specialize sha1_add_block_predict on t.
 #define MAKE_SHA1_RECOMPRESS(T) \
-  static inline void sha1_recompress_ ## T [[gnu::always_inline]](       \
-    uint32_t             cv_in[static restrict  5]    \
-  , uint32_t            cv_out[static restrict  5]    \
-  , const uint32_t           W[static restrict 80]    \
-  , const uint32_t state_ ## T[static restrict  5]) { \
-    sha1_add_block_predict(T, cv_in, cv_out, W, state_ ## T);            \
+  static inline void sha1_recompress_ ## T [[gnu::always_inline]](   \
+    uint32_t             cv_in[static restrict  5]                   \
+  , uint32_t            cv_out[static restrict  5]                   \
+  , const uint32_t           W[static restrict 80]                   \
+  , const uint32_t state_ ## T[static restrict  5]) {                \
+    PROT_PLAIN(add_block_predict)(T, cv_in, cv_out, W, state_ ## T); \
   }
 // have written myself into a corner
 // sorry if your compiler blows up
@@ -213,9 +225,9 @@ static void sha1_recompress_at(
 , const uint32_t   t_cv[static restrict  5]) {
   switch(t) {
 #define USE_SHA1_RECOMPRESS(N) \
-    case N:                                          \
-      if(sha1dc_need_state[N] == -1) unreachable();  \
-      sha1_recompress_ ## N(cv_in, cv_out, W, t_cv); \
+    case N:                                             \
+      if(PROTECTED(need_state)[N] == -1) unreachable(); \
+      sha1_recompress_ ## N(cv_in, cv_out, W, t_cv);    \
       break;
   USE_SHA1_RECOMPRESS( 0) USE_SHA1_RECOMPRESS( 1) USE_SHA1_RECOMPRESS( 2)
   USE_SHA1_RECOMPRESS( 3) USE_SHA1_RECOMPRESS( 4) USE_SHA1_RECOMPRESS( 5)
@@ -249,31 +261,32 @@ static void sha1_recompress_at(
   }
 }
 
-void sha1dc_process [[gnu::visibility("protected")]](
+void PROTECTED(process)(
   struct sha1dc_ctx *restrict ctx
-, const uint32_t block[static restrict 16]) {
+, const uint32_t UNALIGN block[static restrict 16]) {
   memcpy(ctx->ihv1, ctx->ihv, sizeof ctx->ihv);
-  sha1_add_block_expanding_saving(ctx->ihv, block, ctx->m1, ctx->states);
+  PROT_PLAIN(add_block_expanding_saving)(ctx->ihv, block, ctx->m1, ctx->states);
 
   if(!ctx->detect_coll) return;
 
-  uint8_t dvs[sha1dc_dvmask_bytes()];
-  if(ctx->ubc_check) sha1dc_ubc_check(ctx->m1, dvs);
+  uint8_t dvs[PROTECTED(dvmask_bytes)];
+  if(ctx->ubc_check) PROTECTED(ubc_check)(ctx->m1, dvs);
   else for(size_t i = 0; i < countof dvs; i++) dvs[i] = -1;
 
-  if(!sha1dc_check_dvmask(dvs)) return;
-  for(size_t i = 0; i < sha1dc_n_disturbance_vectors; i++) {
+  if(!PROTECTED(check_dvmask)(dvs)) return;
+  for(size_t i = 0; i < PROTECTED(n_disturbance_vectors); i++) {
     if(!(dvs[i / 8] & UINT8_C(1) << i % 8)) continue;
     for(size_t j = 0; j < 80; j++) {
       ctx->m2[j] = ctx->m1[j];
-      ctx->m2[j] ^= sha1dc_disturbance_vectors[i].message_mask[j];
+      ctx->m2[j] ^= PROTECTED(disturbance_vectors)[i].message_mask[j];
     }
-    size_t saved = sha1dc_need_state[sha1dc_disturbance_vectors[i].test_state];
-    if(saved >= sha1dc_n_needed_states) unreachable();
+    size_t saved = PROTECTED(need_state)[
+      PROTECTED(disturbance_vectors)[i].test_state];
+    if(saved >= PROTECTED(n_needed_states)) unreachable();
 
     sha1_chaining_value cv_alternate;
     sha1_recompress_at(
-      sha1dc_disturbance_vectors[i].test_state
+      PROTECTED(disturbance_vectors)[i].test_state
     , ctx->ihv2, cv_alternate
     , ctx->m2, ctx->states[saved]);
 
@@ -283,12 +296,12 @@ void sha1dc_process [[gnu::visibility("protected")]](
       ctx->found_collision = 1;
 
       if (ctx->safe_hash) {
-        sha1_add_block(ctx->ihv, ctx->m1);
-        sha1_add_block(ctx->ihv, ctx->m1);
+        PROT_PLAIN(add_block)(ctx->ihv, ctx->m1);
+        PROT_PLAIN(add_block)(ctx->ihv, ctx->m1);
       }
 
       break;
     }
   }
 }
-
+EXPORT_PROTECTED(process);

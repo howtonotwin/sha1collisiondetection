@@ -11,7 +11,7 @@
 #include <limits.h>
 
 #if CHAR_BIT != 8
-#error "bytes are not 8 bits on this platform; expect breakage!"
+#warning "bytes are not 8 bits on this platform; expect breakage!"
 #endif
 
 // The type of SHA-1 expanded message blocks.
@@ -49,10 +49,11 @@ struct sha1dc_ctx {
 };
 // Number of states that there must be space for in `struct sha1dc_ctx::states`.
 extern const size_t sha1dc_n_needed_states;
-inline size_t sha1dc_ctx_size() [[unsequenced]] {
-  return sizeof(struct sha1dc_ctx)
-       + sizeof(sha1_chaining_value) * sha1dc_n_needed_states;
-}
+// Required size of `struct sha1dc_ctx`, including an appropriately sized
+// `states` array.
+extern const size_t sha1dc_ctx_size;
+// =   sizeof(struct sha1dc_ctx)
+//   + sizeof(sha1_chaining_value) * sha1dc_n_needed_states;
 
 // Description of a class of attacks against SHA-1.
 struct sha1dc_disturbance_vector {
@@ -80,16 +81,14 @@ extern const size_t sha1dc_n_disturbance_vectors;
 // `sha1dc_disturbance_vectors`. The bits of the mask correspond to the array
 // elements in little-endian order (`mask[0] & 1` is associated to
 // `sha1dc_disturbance_vectors[0]`, etc.).
-inline size_t sha1dc_dvmask_bytes() [[unsequenced]] {
-  return sha1dc_n_disturbance_vectors + 7 >> 3;
-}
+extern const size_t sha1dc_dvmask_bytes;
+// = sha1dc_n_disturbance_vectors + 7 >> 3;
+
 // Are any DVs specified in the mask? (This is a convenience/optimization; one
 // may directly check the first `sha1dc_n_disturbance_vectors` bits of
 // `dvmask`.)
 bool sha1dc_check_dvmask(
-  const uint8_t dvmask[static restrict sha1dc_dvmask_bytes()]) [[unsequenced]];
-// Would be inline (the definition is "public"), but then compilers prefer
-// inlining the function to calling it, when the opposite is better.
+  const uint8_t dvmask[static sha1dc_dvmask_bytes]) [[unsequenced]];
 
 // Summary of the `test_state`s of all the `sha1dc_disturbance_vectors`. States
 // (numbered 0 to 80, inclusive) have a nonnegative entry here if any DV needs
@@ -105,24 +104,31 @@ extern const signed char sha1dc_need_state[81];
 // beginning.
 void sha1dc_init(struct sha1dc_ctx*);
 
-// Set whether SHA-1 collisions should be handled silently, without an error.
-// This modifies the hash function, so it is no longer SHA-1, but instead a new
-// function, "safe SHA-1". One key property of "safe SHA-1" is that it has the
-// same value as SHA-1 on almost all inputs, except on those inputs that it
-// detects as malicious. The chance of a non-malicious input block being
-// mistaken for malicious is ~2^-90.
+// Set whether the computed hash is really SHA-1 (when `false`) or if it's a
+// slightly modified version, "safe SHA-1", that is not susceptible to the same
+// collision attacks (used when `true`). The key property of "safe SHA-1" is
+// that it has the same value as SHA-1 on almost all inputs, except on those
+// inputs that are detected to be malicious. The chance of a non-malicious input
+// block being mistaken for malicious is ~2^-90.
 //
-// The other key property of "safe SHA-1" is that it's harder for attackers to
-// find collisions in. When a SHA-1 collision is detected, the near-collision
-// block is hashed 3 times. Effectively, SHA-1 is extended from 80 steps to 240
-// steps for such blocks. The best collision attacks against SHA-1 have
-// complexity about 2^60, so for 240 steps an immediate lower-bound for the best
-// cryptanalytic attacks would be 2^180. An attacker would be better off using a
-// generic birthday search of complexity 2^80.
+// "Safe SHA-1" is intended to be a drop-in replacement for applications that
+// used SHA-1 and need to maintain backwards compatibility. When "safe SHA-1" is
+// used, it is not necessary for application logic to explicitly handle the case
+// of a SHA-1 collision attack being detected.
 //
-// Enabled by default. The default can also be changed at compile time by
-// setting `SHA1DC_INIT_SAFE_HASH_DEFAULT`. Even if set, there is no effect
-// unless `sha1dc_set_detect_coll` is also enabled.
+// "Safe SHA-1" avoid SHA-1 collisions when they are detected by hashing the
+// offending message block 3 times. Thus, even though "safe SHA-1" should be
+// compatible with SHA-1 for all legitimate users, for attackers "safe SHA-1"
+// has the same cryptographic strength as if SHA-1 were extended from 80 steps
+// to 240 steps. The best collision attacks against SHA-1 have complexity about
+// 2^60, so for 240 steps an immediate lower-bound for the best cryptanalytic
+// attacks would be 2^180. An attacker would be better off using a generic
+// birthday search of complexity 2^80.
+//
+// Enabled by default. (That is, the default is to use "safe SHA-1".) The
+// default can also be changed at compile time by setting
+// `SHA1DC_INIT_SAFE_HASH_DEFAULT` to 0. Even when "safe SHA-1" is enabled,
+// there is no effect unless `sha1dc_set_detect_coll` is also enabled.
 void sha1dc_set_safe(struct sha1dc_ctx*, bool);
 
 // Set whether "unavoidable bit conditions" should be used to reduce the amount
@@ -156,9 +162,3 @@ void sha1dc_ingest(
 bool sha1dc_finish [[gnu::access(write_only, 1)]](
   unsigned char[static 20]
 , struct sha1dc_ctx *restrict);
-
-#ifndef SHA1DC_KEEP_DEFINES
-#undef SHA1DC_FWDPRM_EXTENSION
-#undef SHA1DC_FORWARD_PARAM
-#undef SHA1DC_FORWARDED
-#endif

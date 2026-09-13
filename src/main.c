@@ -37,77 +37,78 @@ char* basename(char* path)
 
 int main(int argc, char** argv)
 {
-	FILE* fd;
-	unsigned char hash2[20];
-	char buffer[65536];
-	size_t size;
-	struct sha1dc_ctx ctx2;
-	int i,j,foundcollision;
+  FILE* fd;
+  unsigned char hash2[20];
+  char buffer[65536];
+  size_t size;
+  alignas(struct sha1dc_ctx) char storage[sha1dc_ctx_size];
+#define ctx 0[(struct sha1dc_ctx*)storage]
+  int i,j,foundcollision;
 
-	if (argc < 2)
-	{
-		fprintf(stderr, "Usage: %s <file>\n", basename(argv[0]));
-		return 1;
-	}
+  if (argc < 2)
+  {
+    fprintf(stderr, "Usage: %s <file>\n", basename(argv[0]));
+    return 1;
+  }
 
-	for (i=1; i < argc; ++i)
-	{
-		sha1dc_init(&ctx2);
+  for (i=1; i < argc; ++i)
+  {
+    sha1dc_init(&ctx);
 
-		/* if the program name includes the word 'partial' then also test for reduced-round SHA-1 collisions */
-		if (NULL != strstr(argv[0], "partial"))
-		{
-			sha1dc_set_detect_reduced_round_coll(&ctx2, 1);
-		}
+    /* if the program name includes the word 'partial' then also test for reduced-round SHA-1 collisions */
+    if (NULL != strstr(argv[0], "partial"))
+    {
+      sha1dc_set_detect_reduced_round_coll(&ctx, 1);
+    }
 
-		if(!strcmp(argv[i],"-")) {
-			fd = stdin;
-		} else {
-			fd = fopen(argv[i], "rb");
-		}
-		if (fd == NULL)
-		{
-			fprintf(stderr, "cannot open file: %s: %s\n", argv[i], strerror(errno));
-			return 1;
-		}
+    if(!strcmp(argv[i],"-")) {
+      fd = stdin;
+    } else {
+      fd = fopen(argv[i], "rb");
+    }
+    if (fd == NULL)
+    {
+      fprintf(stderr, "cannot open file: %s: %s\n", argv[i], strerror(errno));
+      return 1;
+    }
 
-		while (1)
-		{
-			size=fread(buffer,1,65536,fd);
-			sha1dc_ingest(&ctx2, (unsigned char*)buffer, size);
-			if (size != 65536)
-				break;
-		}
-		if (ferror(fd))
-		{
-			fprintf(stderr, "error while reading file: %s: %s\n", argv[i], strerror(errno));
-			return 1;
-		}
-		if (!feof(fd))
-		{
-			fprintf(stderr, "not end of file?: %s: %s\n", argv[i], strerror(errno));
-			return 1;
-		}
+    while (1)
+    {
+      size=fread(buffer,1,65536,fd);
+      sha1dc_ingest(&ctx, (unsigned char*)buffer, size);
+      if (size != 65536)
+        break;
+    }
+    if (ferror(fd))
+    {
+      fprintf(stderr, "error while reading file: %s: %s\n", argv[i], strerror(errno));
+      return 1;
+    }
+    if (!feof(fd))
+    {
+      fprintf(stderr, "not end of file?: %s: %s\n", argv[i], strerror(errno));
+      return 1;
+    }
 
-		foundcollision = sha1dc_finish(hash2,&ctx2);
+    foundcollision = sha1dc_finish(hash2,&ctx);
 
-		for (j = 0; j < 20; ++j)
-		{
-			sprintf(buffer+(j*2), "%02x", hash2[j]);
-		}
-		buffer[20*2] = 0;
-		if (foundcollision)
-		{
-			printf("%s *coll* %s\n", buffer, argv[i]);
-		}
-		else
-		{
-			printf("%s  %s\n", buffer, argv[i]);
-		}
+    for (j = 0; j < 20; ++j)
+    {
+      sprintf(buffer+(j*2), "%02x", hash2[j]);
+    }
+    buffer[20*2] = 0;
+    if (foundcollision)
+    {
+      printf("%s *coll* %s\n", buffer, argv[i]);
+    }
+    else
+    {
+      printf("%s  %s\n", buffer, argv[i]);
+    }
 
-		fclose(fd);
-	}
-	return 0;
+    fclose(fd);
+  }
+  return 0;
 }
 
 #ifdef _MSC_VER
