@@ -118,7 +118,7 @@ void sha1dc_set_detect_reduced_round_coll(struct sha1dc_ctx*, bool);
 void sha1dc_set_callback(
   struct sha1dc_ctx*, sha1dc_collision_handler*, void*);
 
-// Add some message data to the hash.
+// Add some message data to the hash. Not async-signal-safe.
 void sha1dc_ingest(
   size_t n;
   struct sha1dc_ctx *restrict
@@ -128,7 +128,7 @@ void sha1dc_ingest(
 // computing the appropriate padding and feeding it to the hash, so the state
 // needs to be reinitialized if it is to be reused.
 //
-// Returns whether a collision was detected.
+// Returns whether a collision was detected. Not async-signal-safe.
 bool sha1dc_finish [[gnu::access(write_only, 1)]](
   unsigned char[static sizeof(sha1_chaining_value)]
 , struct sha1dc_ctx *restrict);

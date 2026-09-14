@@ -265,12 +265,11 @@ static void sha1_recompress_at(
 void PROTECTED(process)(
   struct sha1dc_ctx *restrict ctx
 , const uint32_t UNALIGN block[static restrict 16]) {
-  sha1_expanded_block block_W;
+  alignas(64) thread_local static sha1_expanded_block block_W, twin_W;
   sha1_chaining_value block_in;
-  sha1_chaining_value block_states[sha1dc_n_needed_states];
   memcpy(block_in, ctx->ihv, sizeof block_in);
   PROT_PLAIN(add_block_expanding_saving)(
-    ctx->ihv, block, block_W, block_states);
+    ctx->ihv, block, block_W, sha1dc_process_block_states);
 
   if(!ctx->detect_coll) return;
 
@@ -282,7 +281,6 @@ void PROTECTED(process)(
   for(size_t i = 0; i < PROTECTED(n_disturbance_vectors); i++) {
     if(!(dvs[i / 8] & UINT8_C(1) << i % 8)) continue;
 
-    sha1_expanded_block twin_W;
     for(size_t j = 0; j < 80; j++) {
       twin_W[j]  = block_W[j];
       twin_W[j] ^= PROTECTED(disturbance_vectors)[i].message_mask[j];
@@ -295,17 +293,28 @@ void PROTECTED(process)(
     sha1_recompress_at(
       twin_saved_step
     , twin_in, twin_out
-    , twin_W, block_states[twin_saved_i]);
+    , twin_W, sha1dc_process_block_states[twin_saved_i]);
 
     if(!memcmp(twin_out, ctx->ihv, sizeof ctx->ihv)
     ||    ctx->reduced_round_coll
        && !memcmp(twin_in, block_in, sizeof block_in)) {
       ctx->found_collision = 1;
 
-      if(ctx->collision)
+      if(ctx->collision) {
+        // We shouldn't give ctx->collision a pointer to a thread_local, since
+        // (it could send the pointer to another thread and) it's not portable
+        // to assume other threads can access our thread_locals. Also, we don't
+        // want ctx->collision's arguments to change if it calls us again.
+        //
+        // So we spill our state to the stack, never mind the cost.
+        sha1_expanded_block block_W_local, twin_W_local;
+        memcpy(block_W_local, block_W, sizeof block_W);
+        memcpy(twin_W_local,  twin_W,  sizeof twin_W );
         ctx->collision(
           ctx->collision_closure, ctx->bytes
-        , block_in, twin_in, block_W, twin_W);
+        , block_in, twin_in, block_W_local, twin_W_local);
+        memcpy(block_W, block_W_local, sizeof block_W);
+      }
 
       if (ctx->safe_hash) {
         PROT_PLAIN(add_block)(ctx->ihv, block_W);

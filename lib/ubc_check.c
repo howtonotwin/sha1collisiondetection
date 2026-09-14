@@ -49,18 +49,6 @@
 #include "core_private.h"
 
 // Consuming the output of parse_bitrel (and renaming things)
-typedef bool bit;
-#if ENABLE_AVX512
-// Setting up vector types ("vNuM").
-// Note: <immintrin.h> __mmNNNi types can be read from objects of any type,
-//       with similar rules to standard C char.
-#define U(M) uint ## M ## _t
-#define V(N, M) U(M) __attribute__((vector_size(N * sizeof(U(M)))))
-typedef V(64,  8) v64u8;
-typedef V(16, 32) v16u32;
-#undef V
-#undef U
-#endif
 #define sha1dc_disturbance_vector_dv_class     class
 #define sha1dc_disturbance_vector_k            k
 #define sha1dc_disturbance_vector_b            b
@@ -72,11 +60,11 @@ typedef V(16, 32) v16u32;
 #define sha1dc_ubc_j      j
 #define sha1dc_ubc_c      c
 #define sha1dc_ubc_dvmask dvmask
-#define sha1dc_disturbance_vectors   PROTECTED(disturbance_vectors)
-#define sha1dc_n_disturbance_vectors PROTECTED(n_disturbance_vectors)
+#define sha1dc_disturbance_vectors sha1dc_disturbance_vectors_defn
+#define sha1dc_n_needed_states     sha1dc_n_needed_states_defn
+#define sha1dc_need_state          sha1dc_need_state_defn
 #include "ubc_check.inc"
 #undef sha1dc_disturbance_vectors
-#undef sha1dc_n_disturbance_vectors
 #undef sha1dc_n_needed_states
 #undef sha1dc_need_state
 #undef sha1dc_disturbance_vector_dv_class
@@ -90,8 +78,30 @@ typedef V(16, 32) v16u32;
 #undef sha1dc_ubc_j
 #undef sha1dc_ubc_c
 #undef sha1dc_ubc_dvmask
+
+// Export data for the rest of the library.
+// This "extern [[gnu::alias(constexpr-static)]]" business is super janky and
+// quite possibly not intended to work, but it works.
+extern typeof(sha1dc_disturbance_vectors_defn) PROTECTED(disturbance_vectors) [[
+  gnu::alias("sha1dc_disturbance_vectors_defn")]];
+const size_t PROTECTED(n_disturbance_vectors) =
+  countof PROTECTED(disturbance_vectors);
 extern EXPORT_PROTECTED(disturbance_vectors);
 extern EXPORT_PROTECTED(n_disturbance_vectors);
+
+const size_t PROTECTED(dvmask_bytes) =
+  countof PROTECTED(disturbance_vectors) + 7 >> 3;
+extern EXPORT_PROTECTED(dvmask_bytes);
+
+extern const size_t PROTECTED(n_needed_states) [[
+  gnu::alias("sha1dc_n_needed_states_defn")]];
+extern typeof(sha1dc_need_state_defn) PROTECTED(need_state)[[
+  gnu::alias("sha1dc_need_state_defn")]];
+extern EXPORT_PROTECTED(n_needed_states);
+extern EXPORT_PROTECTED(need_state);
+
+thread_local sha1_chaining_value
+  sha1dc_process_block_states[sha1dc_n_needed_states_defn];
 
 // Now set up enabling processor features for delimited regions of code.
 #define PRAGMA_WORDS(...)            _Pragma(# __VA_ARGS__)
@@ -102,10 +112,6 @@ extern EXPORT_PROTECTED(n_disturbance_vectors);
 #define RESET_FEATURES  _Pragma("GCC pop_options")
 
 // Now code.
-const size_t PROTECTED(dvmask_bytes) =
-  countof PROTECTED(disturbance_vectors) + 7 >> 3;
-extern EXPORT_PROTECTED(dvmask_bytes);
-
 #if !ALWAYS_AVX512
 // This, is roughly equivalent to the one from 2017 due to the (forced) total
 // unrolling and then the ensuing constant propagation. Actually, this one is
@@ -149,6 +155,16 @@ EXPORT_PROTECTED(ubc_check_baseline);
 
 #if ENABLE_AVX512
 SET_FEATURES(USED_AVX512_FEATURES)
+
+// Setting up vector types ("vNuM").
+// Note: <immintrin.h> __mmNNNi types can be read from objects of any type,
+//       with similar rules to standard C char.
+# define U(M) uint ## M ## _t
+# define V(N, M) U(M) __attribute__((vector_size(N * sizeof(U(M)))))
+typedef V(64,  8) v64u8;
+typedef V(16, 32) v16u32;
+# undef V
+# undef U
 
   // Format given inline-asm named operands for use in an x86 assembly template.
 # define AVX512_ARGS3K(dst, k, src1, src2) \

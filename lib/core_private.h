@@ -12,6 +12,9 @@ extern const size_t sha1dc_n_needed_states [[gnu::visibility("hidden")]];
 // among the needed states. I.e. it is the index for that state into an array of
 // states where the unneeded states do not get array elements.
 extern const signed char sha1dc_need_state [[gnu::visibility("hidden")]][81];
+// Space for `sha1dc_process` to put `sha1dc_n_needed_states` saved states.
+extern thread_local sha1_chaining_value
+  sha1dc_process_block_states [[gnu::visibility("hidden")]][];
 
 DECLARE_PROTECTED(process);
 
