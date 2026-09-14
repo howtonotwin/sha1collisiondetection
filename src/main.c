@@ -34,15 +34,16 @@ int main(int, char **argv) {
       argv[0] && argv[1]
     ? (typeof(files))(argv + 1)
     : (static const char *const[]) { "-", nullptr };
+  alignas(sha1dc_ctx_alignment) char ctx_storage[sha1dc_ctx_size()];
+  struct sha1dc_ctx *ctx = (void*)ctx_storage;
 
   bool any_error = false, all_error = true;
   for(; *files; files++) {
-    struct sha1dc_ctx ctx;
-    sha1dc_init(&ctx);
+    sha1dc_init(ctx);
 
     // If the program name includes the word "partial", then also test for
     // reduced-round SHA-1 collisions
-    sha1dc_set_detect_reduced_round_coll(&ctx, strstr(self, "partial"));
+    sha1dc_set_detect_reduced_round_coll(ctx, strstr(self, "partial"));
 
     FILE *f = strcmp(*files, "-") ? fopen(*files, "rb") : stdin;
     if(!f) {
@@ -53,7 +54,7 @@ int main(int, char **argv) {
     }
 
     for(size_t read; read = fread(buffer, 1, sizeof buffer, f);) {
-      sha1dc_ingest(&ctx, buffer, read);
+      sha1dc_ingest(ctx, buffer, read);
       if(read != sizeof buffer) break;
     }
     if(ferror(f)) {
@@ -66,7 +67,7 @@ int main(int, char **argv) {
     all_error = false;
 
     unsigned char hash[sizeof(sha1_chaining_value)];
-    bool collision = sha1dc_finish(hash, &ctx);
+    bool collision = sha1dc_finish(hash, ctx);
     for(size_t i = 0; i < countof hash; i++) printf("%02x", hash[i]);
     fputs(
         collision

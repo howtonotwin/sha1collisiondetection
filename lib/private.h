@@ -1,5 +1,7 @@
 #pragma once
 
+#define SHA1DC_INSIDE_LIBRARY 1
+
 #define STRICT1(F, x) F(x)
 #define STRINGIFY(x)  # x
 

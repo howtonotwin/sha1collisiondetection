@@ -1,24 +1,25 @@
 #pragma once
-#include "core.h"
 #include "private.h"
+#include "data.h"
+#include "sha1_private.h"
 
-// Number of distinct values for `sha1dc_disturbance_vectors[*].test_state`.
-extern const size_t sha1dc_n_needed_states [[gnu::visibility("hidden")]];
-// Summary of the `test_state`s of all the `sha1dc_disturbance_vectors`. States
-// (numbered 0 to 80, inclusive) have a nonnegative entry here if any DV needs
-// them, and they have a -1 if they are never needed.
+#include "core.h"
+
+DECLARE_PROTECTED(dvmask_bytes);
+DECLARE_PROTECTED(check_dvmask);
+
+// Summary of the `test_state`s of all the `sha1dc_disturbance_vectors`: a state
+// (numbered from 0 to 80, inclusive) has a nonnegative entry here if any DV
+// needs it (has it as `test_state`), and has a -1 if it is never needed.
 //
-// The nonnegative number for states that are needed is the number of that state
-// among the needed states. I.e. it is the index for that state into an array of
-// states where the unneeded states do not get array elements.
+// The nonnegative number for states that are needed is the number of that
+// state among the needed states. I.e. it is the index for that state into a
+// "compressed" array of states where unneeded states are left out.
 extern const signed char sha1dc_need_state [[gnu::visibility("hidden")]][81];
-// Space for `sha1dc_process` to put `sha1dc_n_needed_states` saved states.
-extern thread_local sha1_chaining_value
-  sha1dc_process_block_states [[gnu::visibility("hidden")]][];
+// The number of distinct values of `test_state` among the DVs, and the number
+// of nonnegative entries in `compress`.
+extern const size_t sha1dc_n_needed_states [[gnu::visibility("hidden")]];
 
 DECLARE_PROTECTED(process);
-
-extern DECLARE_PROTECTED(dvmask_bytes);
-// Imagine these to use "... dvmask[PROTECTED(dvmask_bytes)]" parameters.
+// The parameter should be "... dvmask[PROTECTED(dvmask_bytes)()]".
 DECLARE_PROTECTED(ubc_check);
-DECLARE_PROTECTED(check_dvmask);

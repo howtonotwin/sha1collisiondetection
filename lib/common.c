@@ -18,18 +18,18 @@
 #endif
 
 void sha1dc_init(struct sha1dc_ctx *ctx) {
-  ctx->ihv[0] = 0x67452301;
-  ctx->ihv[1] = 0xEFCDAB89;
-  ctx->ihv[2] = 0x98BADCFE;
-  ctx->ihv[3] = 0x10325476;
-  ctx->ihv[4] = 0xC3D2E1F0;
+  ctx->cv[0] = 0x67452301;
+  ctx->cv[1] = 0xEFCDAB89;
+  ctx->cv[2] = 0x98BADCFE;
+  ctx->cv[3] = 0x10325476;
+  ctx->cv[4] = 0xC3D2E1F0;
   ctx->bytes = 0;
   ctx->found_collision = false;
   ctx->safe_hash = SHA1DC_INIT_SAFE_HASH_DEFAULT;
   ctx->ubc_check = true;
   ctx->detect_coll = true;
   ctx->reduced_round_coll = false;
-  ctx->collision = NULL;
+  ctx->collision = nullptr;
 }
 
 void sha1dc_set_safe(struct sha1dc_ctx *ctx, bool safe_hash) {
@@ -65,13 +65,11 @@ bool sha1dc_finish(
   if(ctx->bytes & 63 != 56) unreachable();
 
   sha1_store8_aligned_beu64(bits, (unsigned char*)(ctx->buffer + 14));
-  // sha1dc_process uses ctx->bytes if it finds a collision, so make sure to
-  // keep it updated just as sha1dc_ingest does.
   ctx->bytes += 8;
   PROTECTED(process)(ctx, ctx->buffer);
 
-  for(size_t i = 0; i < countof ctx->ihv; i++)
-    sha1_store8_beu32(ctx->ihv[i], output + sizeof *ctx->ihv * i);
+  for(size_t i = 0; i < countof ctx->cv; i++)
+    sha1_store8_beu32(ctx->cv[i], output + sizeof *ctx->cv * i);
   return ctx->found_collision;
 }
 
