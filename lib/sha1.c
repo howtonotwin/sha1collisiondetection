@@ -79,22 +79,9 @@ static inline void sha1_step_bw(
   sha1_E(cv) = q;
 }
 
-#define PROT_PLAIN(sym) sha1_ ## sym ## _
-#ifdef ENABLE_PLAIN_SHA1
-# define MAYBE_EXPORT_PLAIN(sym) \
-    typeof(PROT_PLAIN(sym))                                             \
-      PROT_PLAIN(sym) [[gnu::visibility("hidden")]],                    \
-      sha1_ ## sym [[gnu::alias(STRICT1(STRINGIFY, PROT_PLAIN(sym)))]]; \
-    static_assert(true)
-#else
-# define MAYBE_EXPORT_PLAIN(sym) \
-    typeof(PROT_PLAIN(sym)) PROT_PLAIN(sym) [[gnu::visibility("hidden")]]; \
-    static_assert(true)
-#endif
-
 // SHA-1's compression function (including the feed-forward), which takes an
 // expanded message block.
-void PROT_PLAIN(add_block)(
+static void sha1_add_block(
   uint32_t       cv[static restrict  5]
 , const uint32_t  W[static restrict 80]) {
   sha1_chaining_value state;
@@ -105,11 +92,11 @@ void PROT_PLAIN(add_block)(
 
   for(size_t i = 0; i < countof state; i++) cv[i] += state[i];
 }
-MAYBE_EXPORT_PLAIN(add_block);
 
 // SHA-1's update function, including the message read-in (i.e. endianness
-// handling) and expansion.
-void PROT_PLAIN(add_block_expanding)(
+// handling) and expansion. It's not actually used (yet), but it's kept around
+// as a reference for plain SHA1.
+static void sha1_add_block_expanding [[maybe_unused]](
   uint32_t               cv[static restrict  5]
 , const uint32_t UNALIGN  m[static restrict 16]) {
   sha1_expanded_block W;
@@ -127,10 +114,9 @@ void PROT_PLAIN(add_block_expanding)(
 
   for(size_t i = 0; i < countof state; i++) cv[i] += state[i];
 }
-MAYBE_EXPORT_PLAIN(add_block_expanding);
 
 // The same as sha1_add_block_expanding, but saving W and some states.
-void PROT_PLAIN(add_block_expanding_saving_portable)(
+static void sha1_add_block_expanding_saving_portable(
   uint32_t                   cv[static restrict  5]
 , const uint32_t UNALIGN      m[static restrict 16]
 , uint32_t                    W[static restrict 80]
@@ -141,8 +127,8 @@ void PROT_PLAIN(add_block_expanding_saving_portable)(
 
 #pragma GCC unroll 999
   for(unsigned char i = 0; true; i++) {
-    if(sha1dc_need_state[i] != -1) {
-      if((size_t)sha1dc_need_state[i] != saved) unreachable();
+    if(signed char slot = sha1dc_need_state[i]; slot != -1) {
+      if((unsigned)slot != saved) unreachable();
       memcpy(states[saved++], state, sizeof state);
     }
     if(i >= 80) break;
@@ -156,9 +142,8 @@ void PROT_PLAIN(add_block_expanding_saving_portable)(
 
   for(size_t i = 0; i < countof state; i++) cv[i] += state[i];
 }
-MAYBE_EXPORT_PLAIN(add_block_expanding_saving_portable);
 #if ENABLE_X86_EXTENSIONS
-void PROT_PLAIN(add_block_expanding_saving_x86v4sha)
+static void sha1_add_block_expanding_saving_x86v4sha
 [[gnu::target("avx512f,avx512bw,sha")]](
   uint32_t                   cv[static restrict  5]
 , const uint32_t UNALIGN      m[static restrict 16]
@@ -232,22 +217,8 @@ steps:
     }
 
     old_abcd = cur_abcd;
-    if(in_vector) switch(i / 20) {
-    default:
-      unreachable();
-    case 0:
-      cur_abcd = sha1rnds4(cur_abcd, Wrp0_p3, 0);
-      break;
-    case 1:
-      cur_abcd = sha1rnds4(cur_abcd, Wrp0_p3, 1);
-      break;
-    case 2:
-      cur_abcd = sha1rnds4(cur_abcd, Wrp0_p3, 2);
-      break;
-    case 3:
-      cur_abcd = sha1rnds4(cur_abcd, Wrp0_p3, 3);
-      break;
-    } else _Pragma("GCC unroll 999") for(unsigned char j = 0; j < 4; j++) {
+    if(in_vector) cur_abcd = sha1rnds4(cur_abcd, Wrp0_p3, i / 20);
+    else _Pragma("GCC unroll 999") for(unsigned char j = 0; j < 4; j++) {
       if(signed char slot = sha1dc_need_state[i + j]; slot != -1) {
         if((unsigned)slot != saved) unreachable();
         memcpy(states[saved++], slow_state, sizeof slow_state);
@@ -259,9 +230,8 @@ steps:
 
   for(size_t i = 0; i < countof slow_state; i++) cv[i] += slow_state[i];
 }
-MAYBE_EXPORT_PLAIN(add_block_expanding_saving_x86v4sha);
 #endif
-void PROT_PLAIN(add_block_expanding_saving) [[
+void sha1_add_block_expanding_saving [[
   gnu::visibility("hidden")
 #if ENABLE_X86_EXTENSIONS
 , gnu::ifunc("pick_add_block_expanding_saving")
@@ -273,26 +243,20 @@ void PROT_PLAIN(add_block_expanding_saving) [[
 , sha1_chaining_value    states[static restrict sha1dc_n_needed_states])
 #if ENABLE_X86_EXTENSIONS
 ;
-# ifdef ENABLE_PLAIN_SHA1
-typeof(PROT_PLAIN(add_block_expanding_saving))
-  sha1_add_block_expanding_saving
-    [[gnu::ifunc("pick_add_block_expanding_saving")]];
-# endif
 #else
-{ PROT_PLAIN(add_block_expanding_saving_portable)(cv, m, W, states); }
-MAYBE_EXPORT_PLAIN(add_block_expanding_saving);
+{ sha1_add_block_expanding_saving_portable(cv, m, W, states); }
 #endif
 #if ENABLE_X86_EXTENSIONS
-static typeof(PROT_PLAIN(add_block_expanding_saving))
+static typeof(sha1_add_block_expanding_saving)
 *pick_add_block_expanding_saving() {
   __builtin_cpu_init();
-  typeof(PROT_PLAIN(add_block_expanding_saving)) *impl =
-    PROT_PLAIN(add_block_expanding_saving_portable);
+  typeof(sha1_add_block_expanding_saving) *impl =
+    sha1_add_block_expanding_saving_portable;
   if(
       __builtin_cpu_supports("avx512f")
    && __builtin_cpu_supports("avx512bw")
    && __builtin_cpu_supports("sha"))
-    impl = PROT_PLAIN(add_block_expanding_saving_x86v4sha);
+    impl = sha1_add_block_expanding_saving_x86v4sha;
   return impl;
 }
 #endif
@@ -300,7 +264,7 @@ static typeof(PROT_PLAIN(add_block_expanding_saving))
 // Similar to sha1_add_block, but the caller supplies not the first state but
 // the state after `t` words (!!!). The "input"/first state is reconstructed and
 // returned beside the output. This may be called a "recompression" function.
-static inline void PROT_PLAIN(add_block_predict) [[gnu::always_inline]](
+static inline void sha1_add_block_predict [[gnu::always_inline]](
   unsigned char t
 , uint32_t         cv_in[static restrict  5]
 , uint32_t        cv_out[static restrict  5]
@@ -315,17 +279,15 @@ static inline void PROT_PLAIN(add_block_predict) [[gnu::always_inline]](
   for(size_t i = 0; i < countof(sha1_chaining_value); i++)
     cv_out[i] += cv_in[i];
 }
-// TODO: exporting this blows up compile time and possibly produces slower code?
-// MAYBE_EXPORT_PLAIN(add_block_predict);
 
 // We actually want to specialize sha1_add_block_predict on t.
 #define MAKE_SHA1_RECOMPRESS(T) \
-  static inline void sha1_recompress_ ## T [[gnu::always_inline]](   \
-    uint32_t             cv_in[static restrict  5]                   \
-  , uint32_t            cv_out[static restrict  5]                   \
-  , const uint32_t           W[static restrict 80]                   \
-  , const uint32_t state_ ## T[static restrict  5]) {                \
-    PROT_PLAIN(add_block_predict)(T, cv_in, cv_out, W, state_ ## T); \
+  static inline void sha1_recompress_ ## T [[gnu::always_inline]]( \
+    uint32_t             cv_in[static restrict  5]                 \
+  , uint32_t            cv_out[static restrict  5]                 \
+  , const uint32_t           W[static restrict 80]                 \
+  , const uint32_t state_ ## T[static restrict  5]) {              \
+    sha1_add_block_predict(T, cv_in, cv_out, W, state_ ## T);      \
   }
 // have written myself into a corner
 // sorry if your compiler blows up
@@ -407,7 +369,7 @@ void PROTECTED(process)(
   struct sha1dc_ctx *restrict ctx
 , const uint32_t UNALIGN block[static restrict 16]) {
   memcpy(ctx->block_in, ctx->cv, sizeof ctx->cv);
-  PROT_PLAIN(add_block_expanding_saving)(
+  sha1_add_block_expanding_saving(
     ctx->cv, block, ctx->block_W, ctx->block_state);
 
   if(!ctx->detect_coll) return;
@@ -435,16 +397,16 @@ void PROTECTED(process)(
     if(!memcmp(ctx->twin_out, ctx->cv, sizeof ctx->cv)
     ||    ctx->reduced_round_coll
        && !memcmp(ctx->twin_in, ctx->block_in, sizeof ctx->block_in)) {
-      ctx->found_collision = 1;
+      ctx->found_collision = true;
 
       if(ctx->collision)
         ctx->collision(
           ctx->collision_closure, ctx->bytes
         , ctx->block_in, ctx->twin_in, ctx->block_W, ctx->twin_W);
 
-      if (ctx->safe_hash) {
-        PROT_PLAIN(add_block)(ctx->cv, ctx->block_W);
-        PROT_PLAIN(add_block)(ctx->cv, ctx->block_W);
+      if(ctx->safe_hash) {
+        sha1_add_block(ctx->cv, ctx->block_W);
+        sha1_add_block(ctx->cv, ctx->block_W);
       }
 
       break;
