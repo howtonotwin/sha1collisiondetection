@@ -168,8 +168,8 @@ void PROTECTED(ubc_check_avx512)(
 #else
       if(true)
 #endif
-        IMPOSSIBLE = or_mv16u32_mem(
-          IMPOSSIBLE, ne, IMPOSSIBLE, &sha1dc_avx512_v64ubc_dvmasks[i][j]);
+        IMPOSSIBLE = or_mv16u32(
+          IMPOSSIBLE, ne, IMPOSSIBLE, sha1dc_avx512_v64ubc_dvmasks[i][j]);
       ne >>= impossible_dvmasks;
 #undef  IMPOSSIBLE
     }
