@@ -79,31 +79,28 @@ WRAPPER(v64u8 shuffle_v64u8, "avx512bw")(v64u8 x, v64u8 i) {
   return (v64u8)_mm512_shuffle_epi8((__m512i)x, (__m512i)i);
 }
 struct s2v8u32 { v8u32 lo, hi; };
-INTRINSIC(struct s2v8u32 halves_v16u32, "avx512f")(v16u32 x) {
-  struct s2v8u32 ret;
-  // asm is necessary over the intrinsic. Without it, GCC will do something
-  // ridiculuous in callers:
+WRAPPER(struct s2v8u32 halves_v16u32, "avx512f")(v16u32 x) {
+  // It is necessary to compute `hi` before "computing" `lo`, and it is also
+  // necessary to avoid simplifying to a compound literal. Otherwise, GCC will
+  // do something ridiculuous in callers:
   //     vmovdqa64      xmmB, xmmA
   //     vextracti64x4  xmmA, xmmA, 1
   //     # ... use xmmA as hi and xmmB as lo
   // The correct code is
   //     vextracti64x4  xmmB, xmmA, 1
   //     # ... use xmmA as lo and xmmB as hi
+  struct s2v8u32 ret;
+  ret.hi = (v8u32)_mm512_extracti64x4_epi64((__m512i)x, 1);
   ret.lo = (v8u32)_mm512_castsi512_si256((__m512i)x);
-  asm(
-    "vextracti64x4" AVX512_ARGS2I(dst, src, 1)
-  : [dst]"=v"(ret.hi) : [src]"v"(x));
   return ret;
 }
 WRAPPER(v8u32 or_v8u32, "avx2")(v8u32 x, v8u32 y) {
   return (v8u32)_mm256_or_si256((__m256i)x, (__m256i)y);
 }
 struct s2v4u32 { v4u32 lo, hi; };
-INTRINSIC(struct s2v4u32 halves_v8u32, "avx2")(v8u32 x) {
+WRAPPER(struct s2v4u32 halves_v8u32, "avx2")(v8u32 x) {
   struct s2v4u32 ret;
-  asm(
-    "vextracti128" AVX512_ARGS2I(dst, src, 1)
-  : [dst]"=v"(ret.hi) : [src]"v"(x));
+  ret.hi = (v4u32)_mm256_extracti128_si256((__m256i)x, 1);
   ret.lo = (v4u32)_mm256_castsi256_si128((__m256i)x);
   return ret;
 }
