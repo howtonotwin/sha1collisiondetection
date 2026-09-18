@@ -169,33 +169,21 @@ static void sha1_add_block_expanding_saving_x86v4sha
     halves_v8u32(Wr8_15).lo, halves_v8u32(Wr8_15).hi};
   // Wrn16_n1 = {{W[3], W[2], W[1], W[0]}, ...}; now literally
 
-  size_t saved = 0;
-  sha1_chaining_value slow_state;
-  memcpy(slow_state, cv, sizeof slow_state);
-  v4u32 cur_abcd, old_abcd;
-  bool in_vector = false;
+  v4u32
+    cur_abcd = {sha1_D(cv), sha1_C(cv), sha1_B(cv), sha1_A(cv)},
+    old_abcd = (v4u32)_mm_undefined_si128();
+  old_abcd[3] = sha1_rotate_left(sha1_E(cv), 2);
+  sha1_chaining_value cur_forw;
+  uint32_t Wn1_p2[4];
 steps:
-  STATIC_FOR(unsigned char i = 0; true; i += 4) {
-    bool want_vector = true;
-    STATIC_FOR(unsigned char j = 0; j < 4 && want_vector; j++)
-      want_vector = i + j < 80 && sha1dc_need_state[i + j] == -1;
-
-    if(!in_vector && want_vector) {
-      cur_abcd = (v4u32)_mm_set_epi32(
-        sha1_A(slow_state)
-      , sha1_B(slow_state)
-      , sha1_C(slow_state)
-      , sha1_D(slow_state));
-      old_abcd    = (v4u32)_mm_undefined_si128();
-      old_abcd[3] = sha1_rotate_left(sha1_E(slow_state), 2);
-    } else if(in_vector && !want_vector) {
-      sha1_A(slow_state) = cur_abcd[3];
-      sha1_B(slow_state) = cur_abcd[2];
-      sha1_C(slow_state) = cur_abcd[1];
-      sha1_D(slow_state) = cur_abcd[0];
-      sha1_E(slow_state) = sha1_rotate_right(old_abcd[3], 2);
-    }
-    in_vector = want_vector;
+  STATIC_FOR(signed char i = 0; true; i += 4) {
+    sha1_A(cur_forw) = cur_abcd[3];
+    sha1_B(cur_forw) = cur_abcd[2];
+    sha1_C(cur_forw) = cur_abcd[1];
+    sha1_D(cur_forw) = cur_abcd[0];
+    sha1_E(cur_forw) = sha1_rotate_right(old_abcd[3], 2);
+    sha1_chaining_value cur_back;
+    memcpy(cur_back, cur_forw, sizeof cur_forw);
 
     v4u32 Wrp0_p3;
     if(i < 80) {
@@ -209,22 +197,30 @@ steps:
       }
       *(v4u32 [[gnu::aligned(alignof *W)]]*)&W[i] =
         shuffle_v4u32(Wrp0_p3, v4u32_rev);
-      if(in_vector) Wrp0_p3 = sha1nexte(old_abcd, Wrp0_p3);
+      Wn1_p2[1] = Wrp0_p3[3 - 0];
+      Wn1_p2[2] = Wrp0_p3[3 - 1];
+      Wn1_p2[3] = Wrp0_p3[3 - 2];
+      Wrp0_p3 = sha1nexte(old_abcd, Wrp0_p3);
     }
 
     old_abcd = cur_abcd;
-    if(in_vector) cur_abcd = sha1rnds4(cur_abcd, Wrp0_p3, i / 20);
-    else STATIC_FOR(unsigned char j = 0; j < 4; j++) {
-      if(signed char slot = sha1dc_need_state[i + j]; slot != -1) {
-        if((unsigned)slot != saved) unreachable();
-        memcpy(states[saved++], slow_state, sizeof slow_state);
-      }
+    cur_abcd = sha1rnds4(cur_abcd, Wrp0_p3, i / 20);
+    STATIC_FOR(signed char j = 0; true;) {
+      if(signed char slot = sha1dc_need_state[i + j]; slot != -1)
+        memcpy(states[slot], cur_back, sizeof cur_back);
+      if(--j < -1 || i + j < 0) break;
+      sha1_step_bw(cur_back, Wn1_p2[1 + j], i + j);
+    }
+    STATIC_FOR(unsigned char j = 0; true;) {
       if(i + j >= 80) break steps;
-      sha1_step(slow_state, Wrp0_p3[3 - j], i + j);
+      sha1_step(cur_forw, Wn1_p2[1 + j], i + j);
+      if(++j >= 3) break;
+      if(signed char slot = sha1dc_need_state[i + j]; slot != -1)
+        memcpy(states[slot], cur_forw, sizeof cur_forw);
     }
   }
 
-  for(size_t i = 0; i < countof slow_state; i++) cv[i] += slow_state[i];
+  for(size_t i = 0; i < countof cur_forw; i++) cv[i] += cur_forw[i];
 }
 #endif
 void sha1_add_block_expanding_saving [[
