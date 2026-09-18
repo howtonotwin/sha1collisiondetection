@@ -12,14 +12,6 @@
 #include <stdint.h>
 #include <immintrin.h>
 
-// Nice way to enable processor features for delimited regions of code.
-#define PRAGMA_WORDS(...)            _Pragma(# __VA_ARGS__)
-#define FEATURE_INTO_TARGET(feature) feature ","
-#define SET_FEATURES(F) \
-   _Pragma("GCC push_options") \
-   STRICT1(PRAGMA_WORDS, GCC target F(FEATURE_INTO_TARGET))
-#define RESET_FEATURES  _Pragma("GCC pop_options")
-
 # define U(M)    uint ## M ## _t
 # define V(N, M) U(M) [[gnu::vector_size(N * sizeof(U(M)))]]
 typedef V(64,  8) v64u8;
@@ -130,7 +122,18 @@ WRAPPER(v4u32 sha1nexte, "sha")(v4u32 old_abcd, v4u32 Wrp0_p3) {
   return (v4u32)_mm_sha1nexte_epu32((__m128i)old_abcd, (__m128i)Wrp0_p3);
 }
 WRAPPER(v4u32 sha1rnds4, "sha")(v4u32 abcd, v4u32 Wrp0e_p3, int8_t fk) {
-  return (v4u32)_mm_sha1rnds4_epu32((__m128i)abcd, (__m128i)Wrp0e_p3, fk);
+  switch(fk & 3) {
+  case 0:
+    return (v4u32)_mm_sha1rnds4_epu32((__m128i)abcd, (__m128i)Wrp0e_p3, 0);
+  case 1:
+    return (v4u32)_mm_sha1rnds4_epu32((__m128i)abcd, (__m128i)Wrp0e_p3, 1);
+  case 2:
+    return (v4u32)_mm_sha1rnds4_epu32((__m128i)abcd, (__m128i)Wrp0e_p3, 2);
+  case 3:
+    return (v4u32)_mm_sha1rnds4_epu32((__m128i)abcd, (__m128i)Wrp0e_p3, 3);
+  }
+  // Surprising that GCC can't see this itself
+  unreachable();
 }
 
 // GCC doesn't seem to understand that it can make the dst and src1 operands of

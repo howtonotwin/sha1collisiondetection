@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include "util.h"
 #include "x86.h"
 
 #include "bits.h"
@@ -87,8 +88,7 @@ static void sha1_add_block(
   sha1_chaining_value state;
   memcpy(state, cv, sizeof state);
 
-#pragma GCC unroll 999
-  for(unsigned char i = 0; i < 80; i++) sha1_step(state, W[i], i);
+  STATIC_FOR(unsigned char i = 0; i < 80; i++) sha1_step(state, W[i], i);
 
   for(size_t i = 0; i < countof state; i++) cv[i] += state[i];
 }
@@ -103,8 +103,7 @@ static void sha1_add_block_expanding [[maybe_unused]](
   sha1_chaining_value state;
   memcpy(state, cv, sizeof state);
 
-#pragma GCC unroll 999
-  for(unsigned char i = 0; i < 80; i++) {
+  STATIC_FOR(unsigned char i = 0; i < 80; i++) {
     W[i] =
         i < 16
       ? sha1_load8_maybe_unaligned_beu32((const unsigned char*)(m + i))
@@ -125,8 +124,7 @@ static void sha1_add_block_expanding_saving_portable(
   memcpy(state, cv, sizeof state);
   size_t saved = 0;
 
-#pragma GCC unroll 999
-  for(unsigned char i = 0; true; i++) {
+  STATIC_FOR(unsigned char i = 0; true; i++) {
     if(signed char slot = sha1dc_need_state[i]; slot != -1) {
       if((unsigned)slot != saved) unreachable();
       memcpy(states[saved++], state, sizeof state);
@@ -177,11 +175,9 @@ static void sha1_add_block_expanding_saving_x86v4sha
   v4u32 cur_abcd, old_abcd;
   bool in_vector = false;
 steps:
-#pragma GCC unroll 999
-  for(unsigned char i = 0; true; i += 4) {
+  STATIC_FOR(unsigned char i = 0; true; i += 4) {
     bool want_vector = true;
-#pragma GCC unroll 999
-    for(unsigned char j = 0; j < 4 && want_vector; j++)
+    STATIC_FOR(unsigned char j = 0; j < 4 && want_vector; j++)
       want_vector = i + j < 80 && sha1dc_need_state[i + j] == -1;
 
     if(!in_vector && want_vector) {
@@ -218,7 +214,7 @@ steps:
 
     old_abcd = cur_abcd;
     if(in_vector) cur_abcd = sha1rnds4(cur_abcd, Wrp0_p3, i / 20);
-    else _Pragma("GCC unroll 999") for(unsigned char j = 0; j < 4; j++) {
+    else STATIC_FOR(unsigned char j = 0; j < 4; j++) {
       if(signed char slot = sha1dc_need_state[i + j]; slot != -1) {
         if((unsigned)slot != saved) unreachable();
         memcpy(states[saved++], slow_state, sizeof slow_state);
@@ -272,10 +268,8 @@ static inline void sha1_add_block_predict [[gnu::always_inline]](
 , const uint32_t t_state[static restrict  5]) {
   memcpy(cv_in,  t_state, sizeof(sha1_chaining_value));
   memcpy(cv_out, t_state, sizeof(sha1_chaining_value));
-#pragma GCC unroll 999
-  for(unsigned char i = t; i--;)        sha1_step_bw(cv_in,  W[i], i);
-#pragma GCC unroll 999
-  for(unsigned char i = t; i < 80; i++)    sha1_step(cv_out, W[i], i);
+  STATIC_FOR(unsigned char i = t; i--;)        sha1_step_bw(cv_in,  W[i], i);
+  STATIC_FOR(unsigned char i = t; i < 80; i++)    sha1_step(cv_out, W[i], i);
   for(size_t i = 0; i < countof(sha1_chaining_value); i++)
     cv_out[i] += cv_in[i];
 }

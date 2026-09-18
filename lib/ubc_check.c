@@ -1,17 +1,18 @@
+#include <stdcountof.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "util.h"
+#include "x86.h"
+
+#include "sha1_private.h"
+#include "core_private.h"
+#include "data.h"
+
 // Tweakables
 #ifndef ALWAYS_AVX512
 # define ALWAYS_AVX512 0
-#endif
-// Not "is -funroll-loops on?" but rather "will '#pragma GCC unroll' work?" If
-// this is off, unroll pragmas are not emitted and no extra conditionals are
-// emitted into loops. If sensitive loops still get unrolled (in the case where
-// this is off), the code will be a little suboptimal (few percent slower) If
-// this is on and sensitive loops are not unrolled (e.g. `-Og` makes GCC ignore
-// unroll pragmas, or MSVC does not heed unroll requests at all), the code will
-// be *awful* (~70% percent slower). Do not allow this to happen.
-#ifndef UNROLLING_LOOPS
-  // This is just a best guess
-# define UNROLLING_LOOPS (__OPTIMIZE__ && !__OPTIMIZE_SIZE__)
 #endif
 // see use, below
 #ifndef PARALLEL_ACCUMULATORS
@@ -28,19 +29,6 @@
   X("avx512vl")   \
   X("avx512vbmi")
 
-// Headers
-#include <stdcountof.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include "x86.h"
-
-#include "sha1_private.h"
-#include "core_private.h"
-#include "data.h"
-
-// Now code.
 #if !ALWAYS_AVX512
 // This, is roughly equivalent to the one from 2017 due to the (forced) total
 // unrolling and then the ensuing constant propagation. Actually, this one is
@@ -57,8 +45,7 @@ void PROTECTED(ubc_check_baseline)(
   typedef uint32_t whole_dvmask;
   if(PROTECTED(dvmask_bytes)() > sizeof(whole_dvmask)) abort();
   whole_dvmask possible = -1;
-#pragma GCC unroll 999
-  for(size_t i = 0; i < countof sha1dc_ubcs; i++) {
+  STATIC_FOR(size_t i = 0; i < countof sha1dc_ubcs; i++) {
     auto ubc = sha1dc_ubcs[i];
     whole_dvmask dvs = {};
     memcpy(&dvs, ubc.dvmask, PROTECTED(dvmask_bytes)());
@@ -156,10 +143,7 @@ void PROTECTED(ubc_check_avx512)(
   static_assert(n_v64ubcs == countof sha1dc_avx512_v64ubc_cs);
   static_assert(n_v64ubcs == countof sha1dc_avx512_v64ubc_dvmasks);
   static_assert(accumulation_chunks == countof *sha1dc_avx512_v64ubc_dvmasks);
-#if UNROLLING_LOOPS
-#pragma GCC unroll 999
-#endif
-  for(size_t i = 0; i < n_v64ubcs; i++) {
+  STATIC_FOR(size_t i = 0; i < n_v64ubcs; i++) {
     v64u8
       x = index2_v64u8(w1, w2, sha1dc_avx512_v64ubc_as[i]),
       y = index2_v64u8(w1, w2, sha1dc_avx512_v64ubc_bs[i]);
@@ -169,10 +153,7 @@ void PROTECTED(ubc_check_avx512)(
       // use an explicit intrinsic to make GCC push the constant into a kreg
       // instead of pulling the kreg into a GPR
       ne = _kxor_mask64(b1 ^ b2, sha1dc_avx512_v64ubc_cs[i]);
-#if UNROLLING_LOOPS
-#pragma GCC unroll 999
-#endif
-    for(size_t j = 0; j < accumulation_chunks; j++) {
+    STATIC_FOR(size_t j = 0; j < accumulation_chunks; j++) {
       // Abbreviation for the alternating accumulator
 #define IMPOSSIBLE \
     impossible[(accumulation_chunks * i + j) % PARALLEL_ACCUMULATORS]
@@ -194,7 +175,7 @@ void PROTECTED(ubc_check_avx512)(
     }
   }
 
-  for(size_t i = 1; i < PARALLEL_ACCUMULATORS; i++)
+  SMALL_STATIC_FOR(size_t i = 1; i < PARALLEL_ACCUMULATORS; i++)
     *impossible |= impossible[i];
   whole_dvmask possible = nor_rv16u32(*impossible);
   memcpy(out, &possible, PROTECTED(dvmask_bytes)());

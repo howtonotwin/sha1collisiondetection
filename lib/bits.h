@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <stdbit.h>
 
+#include "util.h"
+
 #ifndef ALLOW_UNALIGNED_ACCESS
 # if  defined __amd64__     || defined __amd64                       \
    || defined __x86_64__    || defined __x86_64                      \
@@ -41,19 +43,15 @@ static inline uint32_t sha1_rotate_right(uint32_t x, int s) {
 }
 # define sha1_load8_aligned_beu32  sha1_load8_beu32
 # define sha1_store8_aligned_beu64 sha1_store8_beu64
-// GCC needs explicit unroll pragmas on all these loops. (!!??)
 static inline uint32_t sha1_load8_beu32(const unsigned char p[static 4]) {
   uint32_t x = 0;
-#pragma GCC unroll 999
-  for(char i = 32; (i -= 8) + 8;) x |= (uint32_t)*p++ << i;
+  SMALL_STATIC_FOR(char i = 32; (i -= 8) + 8;) x |= (uint32_t)*p++ << i;
   return x;
 }
 static inline void sha1_store8_beu64(uint64_t x, unsigned char p[static 8]) {
-#pragma GCC unroll 999
-  for(char i = 64; (i -= 8) + 8;) *p++ = x >> i;
+  SMALL_STATIC_FOR(char i = 64; (i -= 8) + 8;) *p++ = x >> i;
 }
 static inline void sha1_store8_beu32(uint32_t x, unsigned char p[static 4]) {
-#pragma GCC unroll 999
-  for(char i = 32; (i -= 8) + 8;) *p++ = x >> i;
+  SMALL_STATIC_FOR(char i = 32; (i -= 8) + 8;) *p++ = x >> i;
 }
 #endif
