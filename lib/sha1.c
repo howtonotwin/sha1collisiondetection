@@ -12,6 +12,8 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include "x86.h"
+
 #include "bits.h"
 #include "core_private.h"
 #include "sha1_private.h"
@@ -128,7 +130,7 @@ void PROT_PLAIN(add_block_expanding)(
 MAYBE_EXPORT_PLAIN(add_block_expanding);
 
 // The same as sha1_add_block_expanding, but saving W and some states.
-void PROT_PLAIN(add_block_expanding_saving)(
+void PROT_PLAIN(add_block_expanding_saving_portable)(
   uint32_t                   cv[static restrict  5]
 , const uint32_t UNALIGN      m[static restrict 16]
 , uint32_t                    W[static restrict 80]
@@ -154,7 +156,146 @@ void PROT_PLAIN(add_block_expanding_saving)(
 
   for(size_t i = 0; i < countof state; i++) cv[i] += state[i];
 }
+MAYBE_EXPORT_PLAIN(add_block_expanding_saving_portable);
+#if ENABLE_X86_EXTENSIONS
+void PROT_PLAIN(add_block_expanding_saving_x86v4sha)
+[[gnu::target("avx512f,avx512bw,sha")]](
+  uint32_t                   cv[static restrict  5]
+, const uint32_t UNALIGN      m[static restrict 16]
+, uint32_t                    W[static restrict 80]
+, sha1_chaining_value    states[static restrict sha1dc_n_needed_states]) {
+  static constexpr v64u8 v4bev4beu8_native = {
+    15, 14, 13, 12,  11, 10,  9,  8,   7,  6,  5,  4,   3,  2,  1,  0,
+    // The higher bits don't actually count, but they don't hurt
+    31, 30, 29, 28,  27, 26, 25, 24,  23, 22, 21, 20,  19, 18, 17, 16,
+    47, 46, 45, 44,  43, 42, 41, 40,  39, 38, 37, 36,  35, 34, 33, 32,
+    63, 62, 61, 60,  59, 58, 57, 56,  55, 54, 53, 52,  51, 50, 49, 48};
+  static constexpr uint8_t v4u32_rev = 0b00'01'10'11;
+  v16u32 Wr0_15 = (v16u32)shuffle_v64u8(loadu_v64u8(m), v4bev4beu8_native);
+  // v4v4u32 Wr0_15 = {W[0]W[1]W[2]W[3], ..., W[12]W[13]W[14]W[15]},
+  // where juxtaposition means bitstring concatenation, so
+  // Wr0_15 = {{W[3], W[2], W[1], W[0]}, ...};
+  // the SHA1 instructions expect to work on such big-endian vectors
+  v8u32
+    Wr0_7  = (v8u32)halves_v16u32(Wr0_15).lo,
+    Wr8_15 = (v8u32)halves_v16u32(Wr0_15).hi;
+  // "n" for "negative"
+  // the value of W[i] depends on Wrn16_n1 = {W[i - 16], ..., W[i - 1]}
+  v4u32 Wrn16_n1[4] = {
+    halves_v8u32(Wr0_7).lo,  halves_v8u32(Wr0_7).hi,
+    halves_v8u32(Wr8_15).lo, halves_v8u32(Wr8_15).hi};
+  // Wrn16_n1 = {{W[3], W[2], W[1], W[0]}, ...}; now literally
+
+  size_t saved = 0;
+  sha1_chaining_value slow_state;
+  memcpy(slow_state, cv, sizeof slow_state);
+  v4u32 cur_abcd, old_abcd;
+  bool in_vector = false;
+steps:
+#pragma GCC unroll 999
+  for(unsigned char i = 0; true; i += 4) {
+    bool want_vector = true;
+#pragma GCC unroll 999
+    for(unsigned char j = 0; j < 4 && want_vector; j++)
+      want_vector = i + j < 80 && sha1dc_need_state[i + j] == -1;
+
+    if(!in_vector && want_vector) {
+      cur_abcd = (v4u32)_mm_set_epi32(
+        sha1_A(slow_state)
+      , sha1_B(slow_state)
+      , sha1_C(slow_state)
+      , sha1_D(slow_state));
+      old_abcd    = (v4u32)_mm_undefined_si128();
+      old_abcd[3] = sha1_rotate_left(sha1_E(slow_state), 2);
+    } else if(in_vector && !want_vector) {
+      sha1_A(slow_state) = cur_abcd[3];
+      sha1_B(slow_state) = cur_abcd[2];
+      sha1_C(slow_state) = cur_abcd[1];
+      sha1_D(slow_state) = cur_abcd[0];
+      sha1_E(slow_state) = sha1_rotate_right(old_abcd[3], 2);
+    }
+    in_vector = want_vector;
+
+    v4u32 Wrp0_p3;
+    if(i < 80) {
+      if(i < 16) Wrp0_p3 = Wrn16_n1[i / 4];
+      else {
+        Wrp0_p3     = Wrn16_n1[0];
+        Wrp0_p3     =  sha1msg1(Wrp0_p3, Wrn16_n1[0] = Wrn16_n1[1]);
+        Wrp0_p3     = xor_v4u32(Wrp0_p3, Wrn16_n1[1] = Wrn16_n1[2]);
+        Wrp0_p3     =  sha1msg2(Wrp0_p3, Wrn16_n1[2] = Wrn16_n1[3]);
+        Wrn16_n1[3] = Wrp0_p3;
+      }
+      *(v4u32 [[gnu::aligned(alignof *W)]]*)&W[i] =
+        shuffle_v4u32(Wrp0_p3, v4u32_rev);
+      if(in_vector) Wrp0_p3 = sha1nexte(old_abcd, Wrp0_p3);
+    }
+
+    old_abcd = cur_abcd;
+    if(in_vector) switch(i / 20) {
+    default:
+      unreachable();
+    case 0:
+      cur_abcd = sha1rnds4(cur_abcd, Wrp0_p3, 0);
+      break;
+    case 1:
+      cur_abcd = sha1rnds4(cur_abcd, Wrp0_p3, 1);
+      break;
+    case 2:
+      cur_abcd = sha1rnds4(cur_abcd, Wrp0_p3, 2);
+      break;
+    case 3:
+      cur_abcd = sha1rnds4(cur_abcd, Wrp0_p3, 3);
+      break;
+    } else _Pragma("GCC unroll 999") for(unsigned char j = 0; j < 4; j++) {
+      if(signed char slot = sha1dc_need_state[i + j]; slot != -1) {
+        if((unsigned)slot != saved) unreachable();
+        memcpy(states[saved++], slow_state, sizeof slow_state);
+      }
+      if(i + j >= 80) break steps;
+      sha1_step(slow_state, Wrp0_p3[3 - j], i + j);
+    }
+  }
+
+  for(size_t i = 0; i < countof slow_state; i++) cv[i] += slow_state[i];
+}
+MAYBE_EXPORT_PLAIN(add_block_expanding_saving_x86v4sha);
+#endif
+void PROT_PLAIN(add_block_expanding_saving) [[
+  gnu::visibility("hidden")
+#if ENABLE_X86_EXTENSIONS
+, gnu::ifunc("pick_add_block_expanding_saving")
+#endif
+]](
+  uint32_t                   cv[static restrict  5]
+, const uint32_t UNALIGN      m[static restrict 16]
+, uint32_t                    W[static restrict 80]
+, sha1_chaining_value    states[static restrict sha1dc_n_needed_states])
+#if ENABLE_X86_EXTENSIONS
+;
+# ifdef ENABLE_PLAIN_SHA1
+typeof(PROT_PLAIN(add_block_expanding_saving))
+  sha1_add_block_expanding_saving
+    [[gnu::ifunc("pick_add_block_expanding_saving")]];
+# endif
+#else
+{ PROT_PLAIN(add_block_expanding_saving_portable)(cv, m, W, states); }
 MAYBE_EXPORT_PLAIN(add_block_expanding_saving);
+#endif
+#if ENABLE_X86_EXTENSIONS
+static typeof(PROT_PLAIN(add_block_expanding_saving))
+*pick_add_block_expanding_saving() {
+  __builtin_cpu_init();
+  typeof(PROT_PLAIN(add_block_expanding_saving)) *impl =
+    PROT_PLAIN(add_block_expanding_saving_portable);
+  if(
+      __builtin_cpu_supports("avx512f")
+   && __builtin_cpu_supports("avx512bw")
+   && __builtin_cpu_supports("sha"))
+    impl = PROT_PLAIN(add_block_expanding_saving_x86v4sha);
+  return impl;
+}
+#endif
 
 // Similar to sha1_add_block, but the caller supplies not the first state but
 // the state after `t` words (!!!). The "input"/first state is reconstructed and
