@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#include "util.h"
 #include "data.h"
 
 #include "sha1_private.h"
@@ -23,7 +24,9 @@ extern const size_t sha1dc_n_needed_states [[
 
 extern SHA1DC_DEFINE_DVMASK_BYTES(
   PROTECTED(dvmask_bytes), PROTECTED(n_disturbance_vectors))
-SHA1DC_DEFINE_CHECK_DVMASK(PROTECTED(check_dvmask), PROTECTED(dvmask_bytes))
+SHA1DC_DEFINE_CHECK_DVMASK(
+  PROTECTED(check_dvmask), PROTECTED(dvmask_bytes)
+, SMALL_STATIC_FOR)
 EXPORT_PROTECTED(dvmask_bytes);
 EXPORT_PROTECTED(check_dvmask);
 

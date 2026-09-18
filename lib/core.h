@@ -1,5 +1,4 @@
 #pragma once
-#include <stdckdint.h>
 #include <string.h>
 
 #include "bits.h"
@@ -34,23 +33,25 @@ inline SHA1DC_DEFINE_DVMASK_BYTES(
 #define SHA1DC_DECLARE_CHECK_DVMASK(check_dvmask, dvmask_bytes) \
   bool check_dvmask(                                           \
     const uint8_t mask[static dvmask_bytes()]) [[unsequenced]]
-#define SHA1DC_DEFINE_CHECK_DVMASK(check_dvmask, dvmask_bytes) \
-  SHA1DC_DECLARE_CHECK_DVMASK(check_dvmask, dvmask_bytes) {   \
-    uint32_t buf;                                             \
-    size_t i = 0, after;                                      \
-    while(!ckd_sub(&after, dvmask_bytes() - i, sizeof buf)) { \
-      memcpy(&buf, mask + i, sizeof buf);                     \
-      if(buf) return true;                                    \
-      i += sizeof buf;                                        \
-    }                                                         \
-    buf = 0;                                                  \
-    memcpy(&buf, mask + i, after + sizeof buf);               \
-    return buf;                                               \
+#define SHA1DC_DEFINE_CHECK_DVMASK(check_dvmask, dvmask_bytes, for) \
+  SHA1DC_DECLARE_CHECK_DVMASK(check_dvmask, dvmask_bytes) { \
+    uint32_t buf;                                           \
+    const uint8_t *end;                                     \
+    for(                                                    \
+      end = mask + dvmask_bytes()                           \
+    ; (size_t)(end - mask) >= sizeof buf                    \
+    ; mask += sizeof buf) {                                 \
+      memcpy(&buf, mask, sizeof buf);                       \
+      if(buf) return true;                                  \
+    }                                                       \
+    buf = 0;                                                \
+    memcpy(&buf, mask, end - mask);                         \
+    return buf;                                             \
   }
 #if SHA1DC_INSIDE_LIBRARY
 SHA1DC_DECLARE_CHECK_DVMASK(sha1dc_check_dvmask, sha1dc_dvmask_bytes);
 #else
-inline SHA1DC_DEFINE_CHECK_DVMASK(sha1dc_check_dvmask, sha1dc_dvmask_bytes)
+inline SHA1DC_DEFINE_CHECK_DVMASK(sha1dc_check_dvmask, sha1dc_dvmask_bytes, for)
 #endif
 
 // Given an expanded SHA-1 message block, test it for signs of having been
