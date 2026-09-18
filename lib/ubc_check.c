@@ -145,8 +145,8 @@ void PROTECTED(ubc_check_avx512)(
   static_assert(accumulation_chunks == countof *sha1dc_avx512_v64ubc_dvmasks);
   STATIC_FOR(size_t i = 0; i < n_v64ubcs; i++) {
     v64u8
-      x = index2_v64u8(w1, w2, sha1dc_avx512_v64ubc_as[i]),
-      y = index2_v64u8(w1, w2, sha1dc_avx512_v64ubc_bs[i]);
+      x = index_2v64u8(w1, w2, sha1dc_avx512_v64ubc_as[i]),
+      y = index_2v64u8(w1, w2, sha1dc_avx512_v64ubc_bs[i]);
     __mmask64
       b1 = test_v64u8(x, sha1dc_avx512_v64ubc_ms[i]),
       b2 = test_v64u8(y, sha1dc_avx512_v64ubc_ns[i]),
@@ -187,7 +187,6 @@ RESET_FEATURES
 static typeof(PROTECTED(ubc_check)) *pick_ubc_check_impl
 [[gnu::no_sanitize("all")]]() {
   typeof(PROTECTED(ubc_check)) *impl = PROTECTED(ubc_check_baseline);
-#   define CHECK_FEATURE_AND(f) __builtin_cpu_supports(f) &&
   __builtin_cpu_init();
   if(USED_AVX512_FEATURES(CHECK_FEATURE_AND) true)
     impl = PROTECTED(ubc_check_avx512);

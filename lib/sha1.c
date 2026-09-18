@@ -141,33 +141,24 @@ static void sha1_add_block_expanding_saving_portable(
   for(size_t i = 0; i < countof state; i++) cv[i] += state[i];
 }
 #if ENABLE_X86_EXTENSIONS
-static void sha1_add_block_expanding_saving_x86v4sha
-[[gnu::target("avx512f,avx512bw,sha")]](
+#define ADD_BLOCK_EXPANDING_SAVING_X86V2SHA_EXTENSIONS(X) X("ssse3") X("sha")
+SET_FEATURES(ADD_BLOCK_EXPANDING_SAVING_X86V2SHA_EXTENSIONS)
+static void sha1_add_block_expanding_saving_x86v2sha(
   uint32_t                   cv[static restrict  5]
 , const uint32_t UNALIGN      m[static restrict 16]
 , uint32_t                    W[static restrict 80]
 , sha1_chaining_value    states[static restrict sha1dc_n_needed_states]) {
-  static constexpr v64u8 v4bev4beu8_native = {
-    15, 14, 13, 12,  11, 10,  9,  8,   7,  6,  5,  4,   3,  2,  1,  0,
-    // The higher bits don't actually count, but they don't hurt
-    31, 30, 29, 28,  27, 26, 25, 24,  23, 22, 21, 20,  19, 18, 17, 16,
-    47, 46, 45, 44,  43, 42, 41, 40,  39, 38, 37, 36,  35, 34, 33, 32,
-    63, 62, 61, 60,  59, 58, 57, 56,  55, 54, 53, 52,  51, 50, 49, 48};
+  static constexpr v16u8 bev4beu8_native = {
+    15, 14, 13, 12,  11, 10,  9,  8,   7,  6,  5,  4,   3,  2,  1,  0};
   static constexpr uint8_t v4u32_rev = 0b00'01'10'11;
-  v16u32 Wr0_15 = (v16u32)shuffle_v64u8(loadu_v64u8(m), v4bev4beu8_native);
-  // v4v4u32 Wr0_15 = {W[0]W[1]W[2]W[3], ..., W[12]W[13]W[14]W[15]},
-  // where juxtaposition means bitstring concatenation, so
-  // Wr0_15 = {{W[3], W[2], W[1], W[0]}, ...};
-  // the SHA1 instructions expect to work on such big-endian vectors
-  v8u32
-    Wr0_7  = (v8u32)halves_v16u32(Wr0_15).lo,
-    Wr8_15 = (v8u32)halves_v16u32(Wr0_15).hi;
-  // "n" for "negative"
-  // the value of W[i] depends on Wrn16_n1 = {W[i - 16], ..., W[i - 1]}
-  v4u32 Wrn16_n1[4] = {
-    halves_v8u32(Wr0_7).lo,  halves_v8u32(Wr0_7).hi,
-    halves_v8u32(Wr8_15).lo, halves_v8u32(Wr8_15).hi};
-  // Wrn16_n1 = {{W[3], W[2], W[1], W[0]}, ...}; now literally
+  // "n" for "negative": at compressor step `i`, the consumed word `W[i]`
+  // depends on Wrn16_n1 = {W[i - 16], ..., W[i - 1]}.
+  // "r" for "reversed": for some reason, the SHA1 instructions want the vectors
+  // to be reversed (like {W[i + 3], W[i + 2], W[i + 1], W[i]}).
+  v4u32 Wrn16_n1[4];
+  for(size_t i = 0; i < 16; i += 4)
+    Wrn16_n1[i / 4] = (v4u32)index_v16u8(loadu_v16u8(&m[i]), bev4beu8_native);
+  // now, Wrn16_n1 = {{W[3], W[2], W[1], W[0]}, ...};
 
   v4u32
     cur_abcd = {sha1_D(cv), sha1_C(cv), sha1_B(cv), sha1_A(cv)},
@@ -196,7 +187,7 @@ steps:
         Wrn16_n1[3] = Wrp0_p3;
       }
       *(v4u32 [[gnu::aligned(alignof *W)]]*)&W[i] =
-        shuffle_v4u32(Wrp0_p3, v4u32_rev);
+        index_v4u32(Wrp0_p3, v4u32_rev);
       Wn1_p2[1] = Wrp0_p3[3 - 0];
       Wn1_p2[2] = Wrp0_p3[3 - 1];
       Wn1_p2[3] = Wrp0_p3[3 - 2];
@@ -222,6 +213,7 @@ steps:
 
   for(size_t i = 0; i < countof cur_forw; i++) cv[i] += cur_forw[i];
 }
+RESET_FEATURES
 #endif
 void sha1_add_block_expanding_saving [[
   gnu::visibility("hidden")
@@ -244,11 +236,8 @@ static typeof(sha1_add_block_expanding_saving)
   __builtin_cpu_init();
   typeof(sha1_add_block_expanding_saving) *impl =
     sha1_add_block_expanding_saving_portable;
-  if(
-      __builtin_cpu_supports("avx512f")
-   && __builtin_cpu_supports("avx512bw")
-   && __builtin_cpu_supports("sha"))
-    impl = sha1_add_block_expanding_saving_x86v4sha;
+  if(ADD_BLOCK_EXPANDING_SAVING_X86V2SHA_EXTENSIONS(CHECK_FEATURE_AND) true)
+    impl = sha1_add_block_expanding_saving_x86v2sha;
   return impl;
 }
 #endif

@@ -14,9 +14,15 @@
 
 # define U(M)    uint ## M ## _t
 # define V(N, M) U(M) [[gnu::vector_size(N * sizeof(U(M)))]]
+// 512-bit
 typedef V(64,  8) v64u8;
 typedef V(16, 32) v16u32;
+
+// 256-bit
 typedef V( 8, 32) v8u32;
+
+// 128-bit
+typedef V(16,  8) v16u8;
 typedef V( 4, 32) v4u32;
 # undef V
 # undef U
@@ -42,7 +48,6 @@ typedef __mmask16 v16s1;
 #define AVX512_ARGS3K(dst, k, src1, src2) "\t" \
   "{%[" # src2 "], %[" # src1 "], %[" # dst  "]%{%[" # k "]%}"  \
   "|%[" # dst  "]%{%[" # k "]%}, %[" # src1 "], %[" # src2 "]}"
-
 // -flax-vector-conversions would remove the need for these wrappers, but it
 // would also remove the typechecking that comes from using GCC's vector types.
 // So we'll just do things by hand.
@@ -52,8 +57,15 @@ typedef __mmask16 v16s1;
 #define WRAPPER(D, tgt, ...)   INTRINSIC( \
     D                                              \
   , tgt, gnu::artificial __VA_OPT__(,) __VA_ARGS__)
+
 WRAPPER(v64u8 loadu_v64u8, "avx512bw")(const void *p) {
   return (v64u8)_mm512_loadu_epi8(p);
+}
+WRAPPER(v64u8 index_2v64u8, "avx512vbmi")(v64u8 lo, v64u8 hi, v64u8 i) {
+  return (v64u8)_mm512_permutex2var_epi8((__m512i)lo, (__m512i)i, (__m512i)hi);
+}
+WRAPPER(v64s1 test_v64u8, "avx512bw")(v64u8 x, v64u8 y) {
+  return _mm512_test_epi8_mask((__m512i)x, (__m512i)y);
 }
 WRAPPER(v16u32 loadu_v16u32, "avx512f")(const void *p) {
   return (v16u32)_mm512_loadu_epi32(p);
@@ -61,31 +73,39 @@ WRAPPER(v16u32 loadu_v16u32, "avx512f")(const void *p) {
 WRAPPER(v16u32 load_zv16u32, "avx512f")(v64s1 k, const v16u32 *p) {
   return (v16u32)_mm512_maskz_load_epi32(k, p);
 }
-WRAPPER(v64u8 index2_v64u8, "avx512vbmi")(v64u8 lo, v64u8 hi, v64u8 i) {
-  return (v64u8)_mm512_permutex2var_epi8((__m512i)lo, (__m512i)i, (__m512i)hi);
+// GCC doesn't seem to understand that it can make the dst and src1 operands of
+// an AVX-512 instruction generated from an intrinisic the same. This causes it
+// to sprinkle useless movs to copy src1 into dst (even though the remaining
+// copy of the old value is never used again). But it does understand how to get
+// things right for an inline asm statement. Go figure.
+// "OR mask vector 16 uint32_t memory"
+WRAPPER(v16u32 or_mv16u32_mem, "avx512f")(
+  v16u32 dst, v16s1 k, v16u32 src1, const v16u32 *src2) {
+  asm(
+    "vpord" AVX512_ARGS3K(dst, k, src1, src2)
+  : [dst]"+v"(dst)
+  : [k]"Yk"(k), [src1]"v"(src1), [src2]"m"(*src2));
+  return dst;
 }
-WRAPPER(v64s1 test_v64u8, "avx512bw")(v64u8 x, v64u8 y) {
-  return _mm512_test_epi8_mask((__m512i)x, (__m512i)y);
-}
-WRAPPER(v64u8 shuffle_v64u8, "avx512bw")(v64u8 x, v64u8 i) {
-  return (v64u8)_mm512_shuffle_epi8((__m512i)x, (__m512i)i);
-}
+// "NOR reduce ..."
+INTRINSIC(uint32_t nor_rv16u32, "avx512dq,avx512vl")(v16u32);
 struct s2v8u32 { v8u32 lo, hi; };
 WRAPPER(struct s2v8u32 halves_v16u32, "avx512f")(v16u32 x) {
   // It is necessary to compute `hi` before "computing" `lo`, and it is also
   // necessary to avoid simplifying to a compound literal. Otherwise, GCC will
   // do something ridiculuous in callers:
   //     vmovdqa64      xmmB, xmmA
-  //     vextracti64x4  xmmA, xmmA, 1
+  //     vextracti64x4  xmmA, ymmA, 1
   //     # ... use xmmA as hi and xmmB as lo
   // The correct code is
-  //     vextracti64x4  xmmB, xmmA, 1
+  //     vextracti64x4  xmmB, ymmA, 1
   //     # ... use xmmA as lo and xmmB as hi
   struct s2v8u32 ret;
   ret.hi = (v8u32)_mm512_extracti64x4_epi64((__m512i)x, 1);
   ret.lo = (v8u32)_mm512_castsi512_si256((__m512i)x);
   return ret;
 }
+
 WRAPPER(v8u32 or_v8u32, "avx2")(v8u32 x, v8u32 y) {
   return (v8u32)_mm256_or_si256((__m256i)x, (__m256i)y);
 }
@@ -96,14 +116,18 @@ WRAPPER(struct s2v4u32 halves_v8u32, "avx2")(v8u32 x) {
   ret.lo = (v4u32)_mm256_castsi256_si128((__m256i)x);
   return ret;
 }
-WRAPPER(v4u32 shuffle_v4u32, "sse2")(v4u32 x, uint8_t i) {
+
+WRAPPER(v16u8 loadu_v16u8, "sse2")(const void *p) {
+  return (v16u8)_mm_loadu_si128(p);
+}
+WRAPPER(v16u8 index_v16u8, "ssse3")(v16u8 x, v16u8 i) {
+  return (v16u8)_mm_shuffle_epi8((__m128i)x, (__m128i)i);
+}
+WRAPPER(v4u32 index_v4u32, "sse2")(v4u32 x, uint8_t i) {
   return (v4u32)_mm_shuffle_epi32((__m128i)x, i);
 }
 WRAPPER(v4u32 or_v4u32, "sse2")(v4u32 x, v4u32 y) {
   return (v4u32)_mm_or_si128((__m128i)x, (__m128i)y);
-}
-WRAPPER(v4u32 xor_v4u32, "sse2")(v4u32 x, v4u32 y) {
-  return (v4u32)_mm_xor_si128((__m128i)x, (__m128i)y);
 }
 INTRINSIC(v4u32 nor_v4u32, "avx512vl")(v4u32 x, v4u32 y) {
   // _mm256_ternarylogic_epi32 subsumes, but requires only F
@@ -111,7 +135,9 @@ INTRINSIC(v4u32 nor_v4u32, "avx512vl")(v4u32 x, v4u32 y) {
     _mm_undefined_si128(), (__m128i)x, (__m128i)y
   , ~(_MM_TERNLOG_B | _MM_TERNLOG_C));
 }
-
+WRAPPER(v4u32 xor_v4u32, "sse2")(v4u32 x, v4u32 y) {
+  return (v4u32)_mm_xor_si128((__m128i)x, (__m128i)y);
+}
 WRAPPER(v4u32 sha1msg1, "sha")(v4u32 Wrn16_n13, v4u32 Wrn12_n9) {
   return (v4u32)_mm_sha1msg1_epu32((__m128i)Wrn16_n13, (__m128i)Wrn12_n9);
 }
@@ -136,22 +162,6 @@ WRAPPER(v4u32 sha1rnds4, "sha")(v4u32 abcd, v4u32 Wrp0e_p3, int8_t fk) {
   unreachable();
 }
 
-// GCC doesn't seem to understand that it can make the dst and src1 operands of
-// an AVX-512 instruction generated from an intrinisic the same. This causes it
-// to sprinkle useless movs to copy src1 into dst (even though the remaining
-// copy of the old value is never used again). But it does understand how to get
-// things right for an inline asm statement. Go figure.
-// "OR mask vector 16 uint32_t memory"
-WRAPPER(v16u32 or_mv16u32_mem, "avx512f")(
-  v16u32 dst, v16s1 k, v16u32 src1, const v16u32 *src2) {
-  asm(
-    "vpord" AVX512_ARGS3K(dst, k, src1, src2)
-  : [dst]"+v"(dst)
-  : [k]"Yk"(k), [src1]"v"(src1), [src2]"m"(*src2));
-  return dst;
-}
-
-// "NOR reduce ..."
 INTRINSIC(uint32_t nor_rv16u32, "avx512dq,avx512vl")(v16u32 x) {
 #if !__OPTIMIZE__
   // At the end of this, GCC seems to want to do something like
@@ -169,10 +179,10 @@ INTRINSIC(uint32_t nor_rv16u32, "avx512dq,avx512vl")(v16u32 x) {
   v4u32          quarter  = or_v4u32(quarters.lo, quarters.hi);
   // Keep going in the vector unit instead of extracting to GPR (expensive).
   constexpr uint8_t v4u32_as_v2u64_swap    = 0b01'00'11'10;
-  v4u32 eighths = or_v4u32(quarter, shuffle_v4u32(quarter, v4u32_as_v2u64_swap));
+  v4u32 eighths = or_v4u32(quarter, index_v4u32(quarter, v4u32_as_v2u64_swap));
   constexpr uint8_t v4u32_as_v2v2u32_swaps = 0b10'11'00'01;
   v4u32 sxtnths =
-    nor_v4u32(eighths, shuffle_v4u32(eighths, v4u32_as_v2v2u32_swaps));
+    nor_v4u32(eighths, index_v4u32(eighths, v4u32_as_v2v2u32_swaps));
   return sxtnths[0];
 #endif
 }

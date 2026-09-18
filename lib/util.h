@@ -25,6 +25,7 @@
    _Pragma("GCC push_options")                              \
    STRICT1(PRAGMA_WORDS, GCC target F(FEATURE_INTO_TARGET))
 #define RESET_FEATURES               _Pragma("GCC pop_options")
+#define CHECK_FEATURE_AND(f)         __builtin_cpu_supports(f) &&
 
 // A `for` loop marked for "complete" compile-time unrolling (we actually just
 // specify the maximum unroll count GCC will take). Odd idiosyncracy of GCC: it
