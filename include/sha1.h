@@ -32,7 +32,8 @@ typedef uint32_t sha1_expanded_block[80];
 // compressor, and the type of the compressor's intermediate states.
 typedef uint32_t sha1_chaining_value[5];
 // A callback for handling collision blocks when they are found. The pointer
-// arguments should be considered to become indeterminate upon return.
+// arguments (except for `closure`) should be considered to become indeterminate
+// upon return.
 typedef void sha1dc_collision_handler(
   void *closure
 , // Points past the end of the colliding blocks. In other words, the length of

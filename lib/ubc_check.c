@@ -30,10 +30,10 @@
   X("avx512vbmi")
 
 #if !ALWAYS_AVX512
-// This, is roughly equivalent to the one from 2017 due to the (forced) total
-// unrolling and then the ensuing constant propagation. Actually, this one is
+// Roughly equivalent to the original from 2017, but relying on an optimizing
+// compiler instead of a code generator. For some reason, this version is
 // marginally *faster*, even though it's missing some features of the original.
-// TODO: This warrants investigation.
+// TODO: Investigate.
 //
 // Also, this version appears to have much worse variance in runtime, presumably
 // because the low probability UBCs after the early return are not grouped by
@@ -72,6 +72,8 @@ EXPORT_PROTECTED(ubc_check_baseline);
 #if ENABLE_X86_EXTENSIONS
 SET_FEATURES(USED_AVX512_FEATURES)
 
+// This started holding purely by accident, and it's unclear if it actually
+// affects anything. But it's good to keep on eye on.
 static_assert(
     offsetof(struct sha1dc_ctx, block_W[sha1dc_avx512_bias])
   % alignof(v16u32) == 0
@@ -120,6 +122,7 @@ void PROTECTED(ubc_check_avx512)(
     //     should be no difference in throughput. In context,
     //     PARALLEL_ACCUMULATORS=2 produces a slightly faster (~1-3%, in MB/s)
     //     sha1dcsum. The next few values up have no clear effect.
+    //     TODO: Recheck this.
     PARALLEL_ACCUMULATORS]
 #if !UNROLLING_LOOPS
       = {}
@@ -171,7 +174,7 @@ void PROTECTED(ubc_check_avx512)(
         IMPOSSIBLE = or_mv16u32(
           IMPOSSIBLE, ne, IMPOSSIBLE, sha1dc_avx512_v64ubc_dvmasks[i][j]);
       ne >>= impossible_dvmasks;
-#undef  IMPOSSIBLE
+#undef IMPOSSIBLE
     }
   }
 
@@ -184,8 +187,7 @@ EXPORT_PROTECTED(ubc_check_avx512);
 RESET_FEATURES
 
 # if !ALWAYS_AVX512
-static typeof(PROTECTED(ubc_check)) *pick_ubc_check_impl
-[[gnu::no_sanitize("all")]]() {
+static typeof(PROTECTED(ubc_check)) *pick_ubc_check_impl() {
   typeof(PROTECTED(ubc_check)) *impl = PROTECTED(ubc_check_baseline);
   __builtin_cpu_init();
   if(USED_AVX512_FEATURES(CHECK_FEATURE_AND) true)
