@@ -58,15 +58,16 @@ bool sha1dc_finish(
   unsigned char output[static sizeof(sha1_chaining_value)]
 , struct sha1dc_ctx *restrict ctx) {
   uint64_t bits = 8 * ctx->bytes;
-  // Padding + uint64_t bit count must take us to a whole number of blocks
-  uint32_t last = ctx->bytes & 63;
-  uint32_t padn = last < 56 ? 56 - last : 120 - last;
-  sha1dc_ingest(ctx, sha1_padding, padn);
-  if(ctx->bytes & 63 != 56) unreachable();
+  uint8_t  padding_size =
+    ( ctx->bytes + 1 + sizeof bits + sizeof ctx->buffer - 1
+                                  & -sizeof ctx->buffer)
+    - ctx->bytes     - sizeof bits;
+  sha1dc_ingest(ctx, sha1_padding, padding_size);
 
-  sha1_store8_aligned_beu64(bits, (unsigned char*)(ctx->buffer + 14));
-  ctx->bytes += 8;
-  PROTECTED(process)(ctx, ctx->buffer);
+  alignas(alignof bits) unsigned char bits_bytes[sizeof bits];
+  sha1_store8_aligned_beu64(bits, bits_bytes);
+  sha1dc_ingest(ctx, bits_bytes, sizeof bits_bytes);
+  if(ctx->bytes % sizeof ctx->buffer) unreachable();
 
   for(size_t i = 0; i < countof ctx->cv; i++)
     sha1_store8_beu32(ctx->cv[i], output + sizeof *ctx->cv * i);
