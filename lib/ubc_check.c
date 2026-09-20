@@ -25,8 +25,6 @@
 #define USED_AVX512_FEATURES(X) \
   X("avx512f")    \
   X("avx512bw")   \
-  X("avx512dq")   \
-  X("avx512vl")   \
   X("avx512vbmi")
 
 #if !ALWAYS_AVX512
@@ -178,9 +176,17 @@ void PROTECTED(ubc_check_avx512)(
     }
   }
 
-  SMALL_STATIC_FOR(size_t i = 1; i < PARALLEL_ACCUMULATORS; i++)
-    *impossible |= impossible[i];
-  whole_dvmask possible = nor_rv16u32(*impossible);
+  SMALL_STATIC_FOR(size_t i = 2; i < PARALLEL_ACCUMULATORS; i++)
+    impossible[1] |= impossible[i];
+  whole_dvmask possible = nor_r2v16u32(
+    impossible[0]
+  , impossible[
+#if PARALLEL_ACCUMULATORS > 1
+      1
+#else
+      0
+#endif
+    ]);
   memcpy(out, &possible, PROTECTED(dvmask_bytes)());
 }
 EXPORT_PROTECTED(ubc_check_avx512);
