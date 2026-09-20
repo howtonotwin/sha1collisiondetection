@@ -100,13 +100,8 @@ WRAPPER(v16u32 or_mv16u32, "avx512f")(
   return dst;
 #endif
 }
-WRAPPER(v16u32 nor_v16u32, "avx512f")(v16u32 x, v16u32 y) {
-  return (v16u32)_mm512_ternarylogic_epi32(
-    _mm512_undefined_epi32(), (__m512i)x, (__m512i)y
-  , ~(_MM_TERNLOG_B | _MM_TERNLOG_C));
-}
-// "NOR reduce 2 v16u32..."
-INTRINSIC(uint32_t nor_r2v16u32, "avx512f")(v16u32, v16u32);
+// "NOR reduce ..."
+INTRINSIC(uint32_t nor_rv16u32_vl, "avx512vl")(v16u32);
 struct s2v8u32 { v8u32 lo, hi; };
 WRAPPER(struct s2v8u32 halves_v16u32, "avx512f")(v16u32 x) {
   // It is necessary to compute `hi` before "computing" `lo`, and it is also
@@ -124,8 +119,8 @@ WRAPPER(struct s2v8u32 halves_v16u32, "avx512f")(v16u32 x) {
   return ret;
 }
 
-WRAPPER(v8u32 and_v8u32, "avx2")(v8u32 x, v8u32 y) {
-  return (v8u32)_mm256_and_si256((__m256i)x, (__m256i)y);
+WRAPPER(v8u32 or_v8u32, "avx2")(v8u32 x, v8u32 y) {
+  return (v8u32)_mm256_or_si256((__m256i)x, (__m256i)y);
 }
 struct s2v4u32 { v4u32 lo, hi; };
 WRAPPER(struct s2v4u32 halves_v8u32, "avx2")(v8u32 x) {
@@ -147,8 +142,11 @@ WRAPPER(v4u32 index_v4u32, "sse2")(v4u32 x, uint8_t i) {
 WRAPPER(v4u32 or_v4u32, "sse2")(v4u32 x, v4u32 y) {
   return (v4u32)_mm_or_si128((__m128i)x, (__m128i)y);
 }
-WRAPPER(v4u32 and_v4u32, "sse2")(v4u32 x, v4u32 y) {
-  return (v4u32)_mm_and_si128((__m128i)x, (__m128i)y);
+INTRINSIC(v4u32 nor_v4u32, "avx512vl")(v4u32 x, v4u32 y) {
+  // _mm256_ternarylogic_epi32 subsumes, but requires only F
+  return (v4u32)_mm_ternarylogic_epi32(
+    _mm_undefined_si128(), (__m128i)x, (__m128i)y
+  , ~(_MM_TERNLOG_B | _MM_TERNLOG_C));
 }
 WRAPPER(v4u32 xor_v4u32, "sse2")(v4u32 x, v4u32 y) {
   return (v4u32)_mm_xor_si128((__m128i)x, (__m128i)y);
@@ -177,27 +175,39 @@ WRAPPER(v4u32 sha1rnds4, "sha")(v4u32 abcd, v4u32 Wrp0e_p3, int8_t fk) {
   unreachable();
 }
 
-INTRINSIC(uint32_t nor_r2v16u32, "avx512f")(v16u32 x, v16u32 y) {
+INTRINSIC(uint32_t nor_rv16u32_vl, "avx512vl")(v16u32 x) {
 #if !__OPTIMIZE__
-  // GCC puts a pointless mov in this...
-  return ~_mm512_reduce_or_epi32((__m512i)(x | y));
+  // At the end of this, GCC seems to want to do something like
+  //     vpord       xmmA, xmmB, xmmA             # fold up last two u32
+  //     vpternlogd  xmmA, xmmA, xmmA, 0b01010101 # "xmmA = ~xmmA"
+  // This is rather silly, since those could be the one instruction
+  //     vpternlogd  xmmA, xmmA, xmmB, 0b00010001 # "xmmA = ~(xmmA | xmmB)"
+  // There's also a pointless mov somewhere in there...
+  return ~_mm512_reduce_or_epi32((__m512i)x);
 #else
   // If you want something done right, do it yourself!
-  // We can avoid going above F by doing the NOR immediately at v16u32 and
-  // deMorgan-ing the remaining work to ANDs. (That is the reason for
-  // having nor_r2v16u32 and not nor_rv16u32.)
-  v16u32         half     = nor_v16u32(x, y);
-  struct s2v8u32 quarters = halves_v16u32(half);
-  v8u32          quarter  = and_v8u32(quarters.lo, quarters.hi);
-  struct s2v4u32 eighths  = halves_v8u32(quarter);
-  v4u32          eighth   = and_v4u32(eighths.lo,  eighths.hi);
+
+  // A nor_r3v16u32(v16u32, v16u32, v16u32) can be implemented with only F and
+  // not VL, by doing the ternarylogic_epi32 immediately at the v16u32 level
+  // instead of waiting until the v4u32 level. Unfortunately,
+  // _mm512_ternarylogic_epi32/vpternlogd(ZMM) has marginally worse throughput
+  // than _mm_ternarylogic_epi32/vpternlogd(XMM) on currently existing hardware
+  // (the former has more port restrictions than the latter). So (just like GCC)
+  // we want to use the v4u32 NOR when possible.
+  //
+  // Unlike GCC, we can't provide a magic intrinsic that generates differently
+  // based on the ambient `[[gnu::target]]`, so this is explicitly a "_vl"
+  // variant. (The general version isn't used, so it isn't written.)
+  struct s2v8u32 halves = halves_v16u32(x);
+  v8u32          half   = or_v8u32(halves.lo, halves.hi);
+  struct s2v4u32 qrters = halves_v8u32(half);
+  v4u32          qrter  = or_v4u32(qrters.lo, qrters.hi);
   // Keep going in the vector unit instead of extracting to GPR (expensive).
   constexpr uint8_t v4u32_as_v2v2u32_swap  = 0b01'00'11'10;
-  v4u32 sxtnths = and_v4u32(eighth, index_v4u32(eighth, v4u32_as_v2v2u32_swap));
+  v4u32 eiths  =  or_v4u32(qrter, index_v4u32(qrter, v4u32_as_v2v2u32_swap));
   constexpr uint8_t v4u32_as_v2v2u32_swaps = 0b10'11'00'01;
-  v4u32 thysnds =
-    and_v4u32(sxtnths, index_v4u32(sxtnths, v4u32_as_v2v2u32_swaps));
-  return thysnds[0];
+  v4u32 stnths = nor_v4u32(eiths, index_v4u32(eiths, v4u32_as_v2v2u32_swaps));
+  return stnths[0];
 #endif
 }
 

@@ -10,21 +10,15 @@
 #include "core_private.h"
 #include "data.h"
 
-// Tweakables
+// Tweakable
 #ifndef ALWAYS_AVX512
 # define ALWAYS_AVX512 0
 #endif
-// see use, below
-#ifndef PARALLEL_ACCUMULATORS
-# if UNROLLING_LOOPS
-#   define PARALLEL_ACCUMULATORS 2
-# else
-#   define PARALLEL_ACCUMULATORS 1
-# endif
-#endif
+
 #define USED_AVX512_FEATURES(X) \
   X("avx512f")    \
   X("avx512bw")   \
+  X("avx512vl")   \
   X("avx512vbmi")
 
 #if !ALWAYS_AVX512
@@ -99,40 +93,21 @@ void PROTECTED(ubc_check_avx512)(
   // single instruction on x86 that accomplishes `reg &= ~mem` on x86 (there is
   // only `reg = ~reg & mem`). There is, of course, one for `reg |= mem`. (The
   // alternative is to remove the `~` in `reg &= ~mem` by inverting the dvmask
-  // tables statically, but that'd be ugly.)
-  whole_dvmask [[gnu::vector_size(64)]] impossible[
-    // Creating one long dependency chain on one accumulator makes the latency
-    // of this whole function a bit higher than it needs to be. We can instead
-    // alternate between two accumulators and join them up at the end. This
-    // takes advantage of the fact that most (all?) processors with AVX-512 can
-    // do two 512-bit ORs at the same time. In exchange, we need one more OR to
-    // join the accumulators at reduction.
-    //
-    // All this is only going to be profitable if alternating between
-    // accumulators does not involve adding conditional instructions. For this
-    // code, that means the loops need to be unrolled. (Hence the defaults at
-    // the top of the file).
-    //
-    // NB: In a microbenchmark testing just ubc_check, doing this appears to
-    //     have a tiny worsening effect on throughput, <0.5 cycles/call (out of
-    //     20-30). Theoretically (according to llvm-mca, for this author's
-    //     particular core), if there were no external interference, there
-    //     should be no difference in throughput. In context,
-    //     PARALLEL_ACCUMULATORS=2 produces a slightly faster (~1-3%, in MB/s)
-    //     sha1dcsum. The next few values up have no clear effect.
-    //     TODO: Recheck this.
-    PARALLEL_ACCUMULATORS]
-#if !UNROLLING_LOOPS
+  // tables statically, but that'd be ugly. TODO: check if GCC can figure out
+  // making inverted tables (it does do it for scalar code).)
+  whole_dvmask [[gnu::vector_size(64)]] impossible
+#if UNROLLING_LOOPS
+  // When unrolling, we can avoid zeroing. See use below.
+#else
       = {}
 #endif
-  // When unrolling, we can also avoid zeroing. See use below.
   ;
 
   // The accumulator register is not nearly big enough to hold 64 dvmasks for 64
   // UBCs. Its actual width, in units of whole_dvmask, is
   constexpr static size_t impossible_dvmasks =
-    // countof *impossible; // not supported
-    sizeof *impossible / sizeof (*impossible)[0];
+    // countof impossible; // not supported
+    sizeof impossible / sizeof impossible[0];
   // Once we evaluate 64 UBCs and have a "vector" (a mask) of 64 results, it'll
   // need to be broken up into this many chunks:
   constexpr static size_t accumulation_chunks = 64 / impossible_dvmasks;
@@ -151,42 +126,30 @@ void PROTECTED(ubc_check_avx512)(
     __mmask64
       b1 = test_v64u8(x, sha1dc_avx512_v64ubc_ms[i]),
       b2 = test_v64u8(y, sha1dc_avx512_v64ubc_ns[i]),
-      // use an explicit intrinsic to make GCC push the constant into a kreg
+      // An explicit intrinsic makes GCC push the constant into a kreg
       // instead of pulling the kreg into a GPR
       ne = _kxor_mask64(b1 ^ b2, sha1dc_avx512_v64ubc_cs[i]);
     STATIC_FOR(size_t j = 0; j < accumulation_chunks; j++) {
-      // Abbreviation for the alternating accumulator
-#define IMPOSSIBLE \
-    impossible[(accumulation_chunks * i + j) % PARALLEL_ACCUMULATORS]
 #if UNROLLING_LOOPS
       // Not necessary for correctness, just cuts out useless work.
       if(64 * i + impossible_dvmasks * j >= countof sha1dc_ubcs) break;
-      if(accumulation_chunks * i + j < PARALLEL_ACCUMULATORS)
-        // We skipped zeroing IMPOSSIBLE above, because we can replace the first
-        // merge-masking OR with a zeroing-masking load.
-        IMPOSSIBLE = load_zv16u32(ne, &sha1dc_avx512_v64ubc_dvmasks[i][j]);
+      if(!i && !j)
+        // We skipped zeroing `impossible` above, because we can replace the
+        // first merge-masking OR with a zeroing-masking load. (This would also
+        // not be possible when using a "positive" mask.)
+        impossible = load_zv16u32(ne, &sha1dc_avx512_v64ubc_dvmasks[i][j]);
       else
 #else
       if(true)
 #endif
-        IMPOSSIBLE = or_mv16u32(
-          IMPOSSIBLE, ne, IMPOSSIBLE, sha1dc_avx512_v64ubc_dvmasks[i][j]);
+        impossible = or_mv16u32(
+          impossible, ne, impossible, sha1dc_avx512_v64ubc_dvmasks[i][j]);
       ne >>= impossible_dvmasks;
 #undef IMPOSSIBLE
     }
   }
 
-  SMALL_STATIC_FOR(size_t i = 2; i < PARALLEL_ACCUMULATORS; i++)
-    impossible[1] |= impossible[i];
-  whole_dvmask possible = nor_r2v16u32(
-    impossible[0]
-  , impossible[
-#if PARALLEL_ACCUMULATORS > 1
-      1
-#else
-      0
-#endif
-    ]);
+  whole_dvmask possible = nor_rv16u32_vl(impossible);
   memcpy(out, &possible, PROTECTED(dvmask_bytes)());
 }
 EXPORT_PROTECTED(ubc_check_avx512);
