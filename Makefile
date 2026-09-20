@@ -11,21 +11,22 @@ ABI_VERSION_SUPPORTED = 2
 REVISION              = 0
 
 PREFIX     ?= /usr/local
-BINDIR      = $(PREFIX)/bin
-LIBDIR      = $(PREFIX)/lib
-INCLUDEDIR  = $(PREFIX)/include/sha1dc
+BINDIR      = $(DESTDIR)$(PREFIX)/bin
+LIBDIR      = $(DESTDIR)$(PREFIX)/lib
+INCLUDEDIR  = $(DESTDIR)$(PREFIX)/include/sha1dc
 
-DRIVER  ?= gcc
-AR      ?= gcc-ar
-LN      ?= ln
-INSTALL ?= install
+CC       ?= gcc
+DRIVER   ?= $(CC)
+LN       ?= ln
+READLINK ?= readlink
+INSTALL  ?= install
 
 define DRIVE
 $(DRIVER) -O2 -flto $(WAY) $(DRIVERFLAGS) \$ 
 	  
 endef
 define COMPILE.c
-$(DRIVE) -std=gnu2y -Iinclude -Wall -Wextra -Wno-parentheses \$ 
+$(DRIVE) -std=c2y -fasm -Iinclude -Wall -Wextra -Wno-parentheses \$ 
 	  -Dunsequenced=gnu::__unsequenced__ $(CFLAGS) $(CPPFLAGS) \$ 
 	  -c
 endef
@@ -49,32 +50,32 @@ clean:
 .PHONY: install
 install: all
 	$(INSTALL) -d $(LIBDIR) $(BINDIR) $(INCLUDEDIR)
-	$(INSTALL) bin/lib$(LIBNAME).so                            $(LIBDIR)/
+	$(INSTALL) bin/lib$(LIBNAME).a                             $(LIBDIR)/
 	$(INSTALL) bin/lib$(LIBNAME).so.$(ABI_VERSION).$(REVISION) $(LIBDIR)/
-	$(INSTALL) $(ABIS:%=bin/lib$(LIBNAME).so.%)                $(LIBDIR)/
-	$(INSTALL) bin/sha1dcsum             $(BINDIR)/
-	$(INSTALL) bin/sha1dcsum_partialcoll $(BINDIR)/
-	$(INSTALL) -m0644 include/* $(INCLUDEDIR)/
+	set -e; for link in lib$(LIBNAME).so $(ABIS:%=lib$(LIBNAME).so.%); do \
+	  $(LN) -sf -- "$$($(READLINK) -- bin/"$$link")" $(LIBDIR)/"$$link";  \
+	done
+	$(INSTALL) bin/sha1dcsum                                   $(BINDIR)/
+	$(INSTALL) -m0644 include/*                                $(INCLUDEDIR)/
 
 .PHONY: uninstall
 uninstall:
+	-$(RM) $(patsubst include/%,$(INCLUDEDIR)/%,$(wildcard include/*))
+	-$(RM) $(BINDIR)/sha1dcsum
+	-$(RM) $(ABIS:%=$(LIBDIR)/lib$(LIBNAME).so.%)
 	-$(RM) $(LIBDIR)/lib$(LIBNAME).so
 	-$(RM) $(LIBDIR)/lib$(LIBNAME).so.$(ABI_VERSION).$(REVISION)
-	-$(RM) $(ABIS:%=$(LIBDIR)/lib$(LIBNAME).so.%)
-	-$(RM) $(BINDIR)/sha1dcsum
-	-$(RM) $(BINDIR)/sha1dcsum_partialcoll
-	-$(RM) $(patsubst include/%,$(INCLUDEDIR)/%,$(wildcard include/*))
+	-$(RM) $(LIBDIR)/lib$(LIBNAME).a
 	-$(RMDIR) $(INCLUDEDIR)
 
 .PHONY: test
 test: tools
-	test e98a60b463a6868a6ce351ab0166c0af0c8c4721 != `./run sha1dcsum test/sha1_reducedsha_coll.bin | cut -d' ' -f1` || (echo "\nError: Compiled for incorrect endianness" && false)
-	test a56374e1cf4c3746499bc7c0acb39498ad2ee185  = `./run sha1dcsum test/sha1_reducedsha_coll.bin | cut -d' ' -f1`
-	test 16e96b70000dd1e7c85b8368ee197754400e58ec  = `./run sha1dcsum test/shattered-1.pdf | cut -d' ' -f1`
-	test e1761773e6a35916d99f891b77663e6405313587  = `./run sha1dcsum test/shattered-2.pdf | cut -d' ' -f1`
-	test dd39885a2a5d8f59030b451e00cb45da9f9d3828  = `./run sha1dcsum_partialcoll test/sha1_reducedsha_coll.bin | cut -d' ' -f1` 
-	test d3a1d09969c3b57113fd17b23e01dd3de74a99bb  = `./run sha1dcsum_partialcoll test/shattered-1.pdf | cut -d' ' -f1`
-	test 92246b0b718f4c704d37bb025717cbc66babf102  = `./run sha1dcsum_partialcoll test/shattered-2.pdf | cut -d' ' -f1`
+	test a56374e1cf4c3746499bc7c0acb39498ad2ee185 = `./run sha1dcsum             test/sha1_reducedsha_coll.bin | cut -d ' ' -f 1`
+	test 16e96b70000dd1e7c85b8368ee197754400e58ec = `./run sha1dcsum             test/shattered-1.pdf          | cut -d ' ' -f 1`
+	test e1761773e6a35916d99f891b77663e6405313587 = `./run sha1dcsum             test/shattered-2.pdf          | cut -d ' ' -f 1`
+	test dd39885a2a5d8f59030b451e00cb45da9f9d3828 = `./run sha1dcsum_partialcoll test/sha1_reducedsha_coll.bin | cut -d ' ' -f 1`
+	test d3a1d09969c3b57113fd17b23e01dd3de74a99bb = `./run sha1dcsum_partialcoll test/shattered-1.pdf          | cut -d ' ' -f 1`
+	test 92246b0b718f4c704d37bb025717cbc66babf102 = `./run sha1dcsum_partialcoll test/shattered-2.pdf          | cut -d ' ' -f 1`
 	./run sha1dcsum             test/*
 	./run sha1dcsum_partialcoll test/*
 	
