@@ -64,9 +64,6 @@ WRAPPER(v64u8 index_2v64u8, "avx512vbmi")(v64u8 lo, v64u8 hi, v64u8 i) {
 WRAPPER(v64s1 test_v64u8, "avx512bw")(v64u8 x, v64u8 y) {
   return _mm512_test_epi8_mask((__m512i)x, (__m512i)y);
 }
-WRAPPER(v16u32 loadu_v16u32, "avx512f")(const void *p) {
-  return (v16u32)_mm512_loadu_epi32(p);
-}
 WRAPPER(v16u32 load_zv16u32, "avx512f")(v64s1 k, const v16u32 *p) {
   return (v16u32)_mm512_maskz_load_epi32(k, p);
 }
