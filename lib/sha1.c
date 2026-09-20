@@ -202,7 +202,7 @@ steps:
       if(--j < -1 || i + j < 0) break;
       sha1_step_bw(cur_back, Wn1_p2[1 + j], i + j);
     }
-    STATIC_FOR(unsigned char j = 0; true;) {
+    STATIC_FOR(signed char j = 0; true;) {
       if(i + j >= 80) break steps;
       sha1_step(cur_forw, Wn1_p2[1 + j], i + j);
       if(++j >= 3) break;

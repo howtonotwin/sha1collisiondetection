@@ -45,13 +45,16 @@ static inline uint32_t sha1_rotate_right(uint32_t x, int s) {
 # define sha1_store8_aligned_beu64 sha1_store8_beu64
 static inline uint32_t sha1_load8_beu32(const unsigned char p[static 4]) {
   uint32_t x = 0;
-  SMALL_STATIC_FOR(char i = 32; (i -= 8) + 8;) x |= (uint32_t)*p++ << i;
+  SMALL_STATIC_FOR(unsigned char i = 32; (unsigned char)((i -= 8) + 8);)
+    x |= (uint32_t)*p++ << i;
   return x;
 }
 static inline void sha1_store8_beu64(uint64_t x, unsigned char p[static 8]) {
-  SMALL_STATIC_FOR(char i = 64; (i -= 8) + 8;) *p++ = x >> i;
+  SMALL_STATIC_FOR(unsigned char i = 64; (unsigned char)((i -= 8) + 8);)
+    *p++ = x >> i;
 }
 static inline void sha1_store8_beu32(uint32_t x, unsigned char p[static 4]) {
-  SMALL_STATIC_FOR(char i = 32; (i -= 8) + 8;) *p++ = x >> i;
+  SMALL_STATIC_FOR(unsigned char i = 32; (unsigned char)((i -= 8) + 8);)
+    *p++ = x >> i;
 }
 #endif
