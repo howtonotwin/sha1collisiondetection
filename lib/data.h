@@ -7,7 +7,7 @@
 #define sha1dc_disturbance_vector_k            k
 #define sha1dc_disturbance_vector_b            b
 #define sha1dc_disturbance_vector_test_state   test_state
-#define sha1dc_disturbance_vector_message_mask message_mask
+#define sha1dc_disturbance_vector_message_mask alignas(16) message_mask
 #define sha1dc_ubc_a      a
 #define sha1dc_ubc_b      b
 #define sha1dc_ubc_i      i

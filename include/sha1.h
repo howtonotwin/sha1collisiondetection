@@ -139,17 +139,17 @@ struct sha1dc_disturbance_vector {
   enum sha1dc_disturbance_vector_class : unsigned char {
     sha1dc_disturbance_vector_class_I = 1,
     sha1dc_disturbance_vector_class_II
-  }             class;
-  unsigned char k, b;
+  }                    class;
+  unsigned char        k, b;
   // A particular point in the compressor (measured in words consumed), where
   // the compressor state as a message block is being processed should be saved
   // in order to be able to definitively check it for signs of being constructed
   // as prescribed by this DV.
-  unsigned char test_state;
+  unsigned char        test_state;
   // A prescribed pattern of message block bit flips. An attacker "must" use
   // (unless they have a fundamentally novel attack or an implausibly powerful
   // computer) the mask of an "easy" DV to construct a collision attack.
-  uint32_t      message_mask[80];
+  alignas(16) uint32_t message_mask[80];
 };
 // The attack classes defended against. These are expected to be the "easiest"
 // DVs for an attacker to follow to an attack, so they are expected to be the
