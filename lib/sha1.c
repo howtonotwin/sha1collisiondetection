@@ -351,13 +351,16 @@ void PROTECTED(process)(
   sha1_add_block_expanding_saving(
     ctx->cv, block, ctx->block_W, ctx->block_state);
 
-  if(!ctx->detect_coll) return;
+  bool detect_coll = expected(ctx->detect_coll, 1);
+  if(!detect_coll) return;
 
   uint8_t dvs[PROTECTED(dvmask_bytes)()];
-  if(ctx->ubc_check) PROTECTED(ubc_check)(ctx->block_W, dvs);
+  bool ubc_check = expected(ctx->ubc_check, 1);
+  if(ubc_check) PROTECTED(ubc_check)(ctx->block_W, dvs);
   else for(size_t i = 0; i < countof dvs; i++) dvs[i] = -1;
 
-  if(!PROTECTED(check_dvmask)(dvs)) return;
+  bool need_recompress = expected(PROTECTED(check_dvmask)(dvs), 0.047);
+  if(!need_recompress) return;
   for(size_t i = 0; i < PROTECTED(n_disturbance_vectors); i++) {
     if(!(dvs[i / 8] & UINT8_C(1) << i % 8)) continue;
 

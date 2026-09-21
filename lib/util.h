@@ -49,3 +49,7 @@
 // unroll, ignoring `UNROLLING_LOOPS` (and thus the `!__OPTIMIZE_SIZE__` check
 // embedded by default in that condition).
 #define SMALL_STATIC_FOR _Pragma("GCC unroll 65534") for
+
+static inline bool expected [[gnu::always_inline]](bool x, double p) {
+  return __builtin_expect_with_probability(x, 1, p);
+}
