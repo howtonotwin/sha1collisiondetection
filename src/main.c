@@ -7,7 +7,6 @@
 
 #include <stdcountof.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #ifndef _WIN32
@@ -63,7 +62,12 @@ int main(int, char **argv) {
       , self, *files, strerror(errno));
       any_error = true;
       continue;
-    } else if(!feof(f)) abort();
+    } else if(fclose(f)) {
+      fprintf(
+        stderr, "%s: error while closing file '%s': %s\n"
+      , self, *files, strerror(errno));
+      any_error = true;
+    }
     all_error = false;
 
     unsigned char hash[sizeof(sha1_chaining_value)];
@@ -75,8 +79,6 @@ int main(int, char **argv) {
       : "        "
     , stdout);
     puts(*files);
-
-    fclose(f);
   }
   return any_error + 2 * all_error;
 }
