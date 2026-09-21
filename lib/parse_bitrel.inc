@@ -1,6 +1,5 @@
 // This code was generated programmatically.
-// See github.com/cr-marcstevens/sha1collisiondetection-tools
-// or  github.com/howtonotwin/sha1collisiondetection-tools.
+// See https://github.com/howtonotwin/sha1collisiondetection-tools.
 struct sha1dc_disturbance_vector {
   enum sha1dc_disturbance_vector_class : unsigned char {
     sha1dc_disturbance_vector_class_I = 1,

@@ -1,9 +1,9 @@
-/***
-* Copyright 2017 Marc Stevens <marc@marc-stevens.nl>, Dan Shumow <danshu@microsoft.com>
-* Distributed under the MIT Software License.
-* See accompanying file LICENSE.txt or copy at
-* https://opensource.org/licenses/MIT
-***/
+// © 2017 Marc Stevens <marc@marc-stevens.nl>, Dan Shumow <danshu@microsoft.com>
+// © 2026 Rasheeq Azad <rasheeqazad@howtonotwin.net>
+// SPDX-License-Identifier: MIT
+//
+// License text available in accompanying file LICENSE.txt, or at
+// https://opensource.org/licenses/MIT.
 
 #include <stdcountof.h>
 #include <stdio.h>

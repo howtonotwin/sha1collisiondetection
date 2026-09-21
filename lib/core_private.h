@@ -1,3 +1,9 @@
+// © 2017 Marc Stevens <marc@marc-stevens.nl>, Dan Shumow <danshu@microsoft.com>
+// © 2026 Rasheeq Azad <rasheeqazad@howtonotwin.net>
+// SPDX-License-Identifier: MIT
+//
+// License text available in accompanying file LICENSE.txt, or at
+// https://opensource.org/licenses/MIT.
 #pragma once
 #include "private.h"
 #include "data.h"

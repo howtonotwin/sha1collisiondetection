@@ -1,10 +1,10 @@
+// © 2017 Marc Stevens <marc@marc-stevens.nl>, Dan Shumow <danshu@microsoft.com>
+// © 2026 Rasheeq Azad <rasheeqazad@howtonotwin.net>
+// SPDX-License-Identifier: MIT
+//
+// License text available in accompanying file LICENSE.txt, or at
+// https://opensource.org/licenses/MIT.
 #pragma once
-/***
-* Copyright 2017 Marc Stevens <marc@marc-stevens.nl>, Dan Shumow <danshu@microsoft.com>
-* Distributed under the MIT Software License.
-* See accompanying file LICENSE.txt or copy at
-* https://opensource.org/licenses/MIT
-***/
 
 #include <stddef.h>
 #include <stdint.h>
@@ -15,16 +15,19 @@
 #endif
 
 /// API/ABI notes:
-/// All exported symbols are prefixed either "sha1dc_" or "sha1_", and any such
-/// identifiers should be considered reserved. All user-facing macros are
-/// prefixed "SHA1DC_", and all such names are also reserved. When including a
-/// library header, avoid having any macro definitions for all-lowercase
-/// identifiers (even those that do not begin with one of the aforementioned
-/// prefixes), except for those provided by the system.
+/// The library's identifiers with external linkage (i.e. its exported symbols)
+/// are prefixed "sha1dc_". The library may also define identifiers prefixed
+/// with "sha1_" (without linkage, e.g. as `typedef`s). Library consumers should
+/// consider identifiers with either prefix reserved. User-facing macros are (or
+/// would be) prefixed "SHA1DC_", and all such identifiers are also reserved.
 ///
-/// Various possibly useful functions and constants beyond those in the
-/// user-facing headers are exported (some optionally) from the library, at the
-/// binary level, but nice headers for them have not been provided (yet).
+/// When including a library header, avoid having any macro definitions for
+/// all-lowercase identifiers (even those that do not begin with one of the
+/// aforementioned prefixes), except for those provided by the system.
+///
+/// A few possibly useful functions and constants beyond those in this header
+/// have external linkage (are exported from the library), at the binary level,
+/// but nice declarations for them have not been provided (yet).
 
 // The type of SHA-1 expanded message blocks.
 typedef uint32_t sha1_expanded_block[80];
@@ -32,8 +35,8 @@ typedef uint32_t sha1_expanded_block[80];
 // compressor, and the type of the compressor's intermediate states.
 typedef uint32_t sha1_chaining_value[5];
 // A callback for handling collision blocks when they are found. The pointer
-// arguments (except for `closure`) should be considered to become indeterminate
-// upon return.
+// arguments' values (except for `closure`'s) should be considered to become
+// indeterminate upon return.
 typedef void sha1dc_collision_handler(
   void *closure
 , // Points past the end of the colliding blocks. In other words, the length of
@@ -81,12 +84,13 @@ void sha1dc_init(struct sha1dc_ctx*);
 // inputs that are detected to be malicious. The chance of a non-malicious input
 // block being mistaken for malicious is ~2^-90.
 //
-// "Safe SHA-1" is intended to be a drop-in replacement for applications that
-// used SHA-1 and need to maintain backwards compatibility. When "safe SHA-1" is
-// used, it is not necessary for application logic to explicitly handle the case
-// of a SHA-1 collision attack being detected.
+// The "safe hash" mode is intended to be a drop-in replacement for applications
+// that used SHA-1 and need to secure themselves against collision attacks while
+// maintaining backwards compatibility. When "safe SHA-1" is used to replace
+// SHA-1, it is not necessary for application logic to explicitly handle the
+// case of a SHA-1 collision attack being detected.
 //
-// "Safe SHA-1" avoids SHA-1 collisions when they are detected by hashing the
+// "Safe hash" mode avoids collisions when they are detected by hashing the
 // offending message block 2 extra times. Thus, even though "safe SHA-1" should
 // be compatible with SHA-1 for all legitimate users, for attackers "safe SHA-1"
 // has about the same cryptographic strength as if SHA-1 were extended from 80
@@ -95,11 +99,10 @@ void sha1dc_init(struct sha1dc_ctx*);
 // lower-bound for the best cryptanalytic attacks would be 2^180. An attacker
 // would be better off using a generic birthday search of complexity 2^80.
 //
-// Enabled by default. (That is, the default is to use "safe SHA-1".) The
-// default can also be changed at compile time by setting
-// `SHA1DC_INIT_SAFE_HASH_DEFAULT` to 0. Even when "safe SHA-1" is enabled,
-// there is no effect unless `sha1dc_set_detect_coll` is also enabled.
-void sha1dc_set_safe(struct sha1dc_ctx*, bool);
+// Enabled by default. The default can also be changed at compile time by
+// setting `SHA1DC_INIT_SAFE_HASH_DEFAULT` to 0. Even when "safe hash" mode is
+// enabled, there is no effect unless `sha1dc_set_detect_coll` is also enabled.
+void sha1dc_set_safe_hash_mode(struct sha1dc_ctx*, bool);
 
 // Set whether "unavoidable bit conditions" should be used to reduce the amount
 // of work done. This provides a large speedup. Enabled by default.
@@ -141,14 +144,13 @@ struct sha1dc_disturbance_vector {
     sha1dc_disturbance_vector_class_II
   }                    class;
   unsigned char        k, b;
-  // A particular point in the compressor (measured in words consumed), where
-  // the compressor state as a message block is being processed should be saved
-  // in order to be able to definitively check it for signs of being constructed
-  // as prescribed by this DV.
+  // A point in the compressor (identified by the number of expanded message
+  // block words already consumed) where the compressor state should be the same
+  // between any two colliding message blocks constructed from this DV.
   unsigned char        test_state;
-  // A prescribed pattern of message block bit flips. An attacker "must" use
-  // (unless they have a fundamentally novel attack or an implausibly powerful
-  // computer) the mask of an "easy" DV to construct a collision attack.
+  // A prescribed pattern of message block bit flips. An attacker "must" (unless
+  // they have a fundamentally novel attack or an implausibly powerful computer)
+  // use the mask of an "easy" DV to construct a collision attack.
   alignas(16) uint32_t message_mask[80];
 };
 // The attack classes defended against. These are expected to be the "easiest"

@@ -1,3 +1,9 @@
+// © 2017 Marc Stevens <marc@marc-stevens.nl>, Dan Shumow <danshu@microsoft.com>
+// © 2026 Rasheeq Azad <rasheeqazad@howtonotwin.net>
+// SPDX-License-Identifier: MIT
+//
+// License text available in accompanying file LICENSE.txt, or at
+// https://opensource.org/licenses/MIT.
 #pragma once
 #include "private.h"
 #include "data.h"
@@ -12,7 +18,7 @@ struct sha1dc_ctx {
 
   // Library settings
   bool found_collision    : 1;
-  bool safe_hash          : 1;
+  bool do_safe_hash       : 1;
   bool detect_coll        : 1;
   bool ubc_check          : 1;
   bool reduced_round_coll : 1;

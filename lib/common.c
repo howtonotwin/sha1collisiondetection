@@ -1,10 +1,9 @@
-/***
-* Copyright 2017 Marc Stevens <marc@marc-stevens.nl>, Dan Shumow (danshu@microsoft.com)
-* Distributed under the MIT Software License.
-* See accompanying file LICENSE.txt or copy at
-* https://opensource.org/licenses/MIT
-***/
-
+// © 2017 Marc Stevens <marc@marc-stevens.nl>, Dan Shumow <danshu@microsoft.com>
+// © 2026 Rasheeq Azad <rasheeqazad@howtonotwin.net>
+// SPDX-License-Identifier: MIT
+//
+// License text available in accompanying file LICENSE.txt, or at
+// https://opensource.org/licenses/MIT.
 #include <stdcountof.h>
 #include <string.h>
 
@@ -13,8 +12,8 @@
 
 #include "sha1.h"
 
-#ifndef SHA1DC_INIT_SAFE_HASH_DEFAULT
-#define SHA1DC_INIT_SAFE_HASH_DEFAULT 1
+#ifndef DO_SAFE_HASH_DEFAULT
+#define DO_SAFE_HASH_DEFAULT 1
 #endif
 
 void sha1dc_init(struct sha1dc_ctx *ctx) {
@@ -25,15 +24,15 @@ void sha1dc_init(struct sha1dc_ctx *ctx) {
   ctx->cv[4] = 0xC3D2E1F0;
   ctx->bytes = 0;
   ctx->found_collision = false;
-  ctx->safe_hash = SHA1DC_INIT_SAFE_HASH_DEFAULT;
+  ctx->do_safe_hash = DO_SAFE_HASH_DEFAULT;
   ctx->ubc_check = true;
   ctx->detect_coll = true;
   ctx->reduced_round_coll = false;
   ctx->collision = nullptr;
 }
 
-void sha1dc_set_safe(struct sha1dc_ctx *ctx, bool safe_hash) {
-  ctx->safe_hash = safe_hash;
+void sha1dc_set_do_safe_hash(struct sha1dc_ctx *ctx, bool do_safe_hash) {
+  ctx->do_safe_hash = do_safe_hash;
 }
 void sha1dc_set_use_ubc(struct sha1dc_ctx *ctx, bool ubc_check) {
   ctx->ubc_check = ubc_check;

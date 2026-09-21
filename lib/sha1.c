@@ -1,10 +1,9 @@
-/***
-* Copyright 2017 Marc Stevens <marc@marc-stevens.nl>, Dan Shumow (danshu@microsoft.com)
-* Distributed under the MIT Software License.
-* See accompanying file LICENSE.txt or copy at
-* https://opensource.org/licenses/MIT
-***/
-
+// © 2017 Marc Stevens <marc@marc-stevens.nl>, Dan Shumow <danshu@microsoft.com>
+// © 2026 Rasheeq Azad <rasheeqazad@howtonotwin.net>
+// SPDX-License-Identifier: MIT
+//
+// License text available in accompanying file LICENSE.txt, or at
+// https://opensource.org/licenses/MIT.
 #include <limits.h>
 #include <stdbit.h>
 #include <stdcountof.h>
@@ -359,7 +358,10 @@ void PROTECTED(process)(
   if(ubc_check) PROTECTED(ubc_check)(ctx->block_W, dvs);
   else for(size_t i = 0; i < countof dvs; i++) dvs[i] = -1;
 
-  bool need_recompress = expected(PROTECTED(check_dvmask)(dvs), 0.047);
+  bool need_recompress = expected(
+    PROTECTED(check_dvmask)(dvs)
+  , // empirical false-positive rate of ubc_check when hashing random data
+    0.047);
   if(!need_recompress) return;
   for(size_t i = 0; i < PROTECTED(n_disturbance_vectors); i++) {
     if(!(dvs[i / 8] & UINT8_C(1) << i % 8)) continue;
@@ -386,7 +388,7 @@ void PROTECTED(process)(
           ctx->collision_closure, ctx->bytes
         , ctx->block_in, ctx->twin_in, ctx->block_W, ctx->twin_W);
 
-      if(ctx->safe_hash) {
+      if(ctx->do_safe_hash) {
         sha1_add_block(ctx->cv, ctx->block_W);
         sha1_add_block(ctx->cv, ctx->block_W);
       }
