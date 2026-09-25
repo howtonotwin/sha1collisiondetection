@@ -48,26 +48,26 @@ fully optimized `ubc_check_avx512`, can increase overall throughput by >50%!  */
 #if (   defined __amd64__ || defined __amd64 || defined __x86_64__  \
      || defined __x86_64  || defined _M_X64  || defined _M_AMD64  ) \
   && !SHA1DC_DISABLE_AVX512
-# define SHA1DC_BUILD_AVX512   1
-# define SHA1DC_BUILD_DISPATCH !SHA1DC_ALWAYS_AVX512
-# define SHA1DC_BUILD_PORTABLE !SHA1DC_ALWAYS_AVX512
+# define SHA1DC_BUILD_AVX512       1
+# define SHA1DC_BUILD_DISPATCH_X86 !SHA1DC_ALWAYS_AVX512
+# define SHA1DC_BUILD_PORTABLE     !SHA1DC_ALWAYS_AVX512
 #else /* elif !defined __amd64__ && ... || SHA1DC_DISABLE_AVX512 */
-# define SHA1DC_BUILD_AVX512   0
-# define SHA1DC_BUILD_PORTABLE 1
-# define SHA1DC_BUILD_DISPATCH 0
+# define SHA1DC_BUILD_AVX512       0
+# define SHA1DC_BUILD_DISPATCH_X86 0
+# define SHA1DC_BUILD_PORTABLE     1
 #endif
 
-/* Tweakable setting. If loops marked "#pragma GCC unroll" will be unrolled,
+/* Tweakable setting. If loops marked `#pragma GCC unroll` will be unrolled,
 then setting this to 1 will produce better code. If the affected loops are
 unrolled and this is 0, the code will be fine but slightly suboptimal. If the
 affected loops are not unrolled and this is 1, then their code will be slightly
 *worse* than if this were 0.
 
-This option disables itself when __OPTIMIZE_SIZE__ (i.e. under `-Os`). GCC/Clang
-would still obey "#pragma GCC unroll" (after all, some loops get smaller when
-unrolled), but we choose not to produce it. It is never on for other compilers
-that may not heed "#pragma GCC unroll" (e.g. MSVC), since they are unlikely to
-figure out that it's good to unroll these loops on their own.                */
+This option disables itself when `__OPTIMIZE_SIZE__` (i.e. under `-Os`).
+GCC/Clang would still obey `#pragma GCC unroll` (after all, some loops get
+smaller when unrolled), but we choose not to produce it. It is never on for
+other compilers that may not heed `#pragma GCC unroll` (e.g. MSVC), since they
+are unlikely to figure out that it's good to unroll these loops on their own. */
 #if  !defined SHA1DC_UNROLLING_LOOPS \
   && defined __GNUC__ && __OPTIMIZE__ && !__OPTIMIZE_SIZE__
 #  define SHA1DC_UNROLLING_LOOPS 1
@@ -76,7 +76,7 @@ figure out that it's good to unroll these loops on their own.                */
 #ifndef SHA1DC_HAVE_STDATOMIC
 #  if  __GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ >= 9                \
     || __clang_major__ > 3 || __clang_major__ == 3 && __clang_minor__ >= 2 \
-    || __STDC_VERSION__ >= 201112L /* NB: MSVC demands C11 for _Atomic */
+    || __STDC_VERSION__ >= 201112L
 #   define SHA1DC_HAVE_STDATOMIC 1
 #  else
 #   define SHA1DC_HAVE_STDATOMIC 0
@@ -89,12 +89,12 @@ figure out that it's good to unroll these loops on their own.                */
 # if SHA1DC_BUILD_AVX512
 #   include <immintrin.h>
 # endif
-# if SHA1DC_BUILD_DISPATCH
+# if SHA1DC_BUILD_DISPATCH_X86
 #   if   __GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ >= 4 \
       || __clang_major__ >= 9
 #     include <cpuid.h>
 #     define cpuid(regs, leaf, subleaf)                                   \
-        __get_cpuid_count(leaf, subleaf, /* no __cpuidex on old GCC */    \
+        __get_cpuid_count(leaf, subleaf, /* no `__cpuidex` on old GCC */  \
                           &(regs)[0], &(regs)[1], &(regs)[2], &(regs)[3])
 #   elif _MSC_VER >= 1400
 #     include <intrin.h>
@@ -102,10 +102,10 @@ figure out that it's good to unroll these loops on their own.                */
 #   else
 #     warning "Runtime AVX-512 detection needs GCC/Clang or MSVC CPUID "   \
               "intrinsics. For unsupported compilers, please pass either " \
-              "-DSHA1DC_DISABLE_AVX512=1 or -DSHA1DC_ALWAYS_AVX512=1."
+              "`-DSHA1DC_DISABLE_AVX512=1` or `-DSHA1DC_ALWAYS_AVX512=1`."
 #   endif
 #   ifdef __clang__
-      /* Clang has a problem with its <immintrin.h>'s _xgetbv. */
+      /* Clang has a problem with its `<immintrin.h>`'s `_xgetbv`. */
 #     define xgetbv(xcr) \
         _Pragma("clang diagnostic push")                    \
         _Pragma("clang diagnostic ignored \"-Wlong-long\"") \
@@ -117,9 +117,13 @@ figure out that it's good to unroll these loops on their own.                */
 #   if SHA1DC_HAVE_STDATOMIC
 #     include <stdatomic.h>
 #   else
-#     warning "Runtime AVX-512 detection needs C11 <stdatomic.h>/_Atomic " \
-              "support. For unsupported environments, please pass either " \
-              "-DSHA1DC_DISABLE_AVX512=1 or -DSHA1DC_ALWAYS_AVX512=1."
+      /* We just need (relaxed) atomic loads and stores (of pointers). On x86,
+      aligned loads and stores already are atomic. In the pre-`stdatomic.h` era
+      (and thus in the pre-"data races are UB" era), we can just do normal loads
+      and stores and expect that to be fine. (This case covers current MSVC,
+      which only exposes `_Atomic` at `/std:c11`.)                            */
+#     define atomic_load_explicit(ptr, order)         0[ptr]
+#     define atomic_store_explicit(ptr, value, order) (0[ptr] = value, (void)0)
 #   endif
 # endif
 #endif
@@ -255,10 +259,10 @@ static const struct ubc ubcs[] = {
 	{36, 37,  4,  4, 1, 0x00000800}, {36, 40,  3, 28, 0, 0x00100000},
 	{40, 44,  4, 29, 0, 0x08000000}, {37, 38,  4,  4, 1, 0x00002000}};
 
-#if SHA1DC_BUILD_DISPATCH
+#if SHA1DC_BUILD_DISPATCH_X86
 # define SHA1DC_DISPATCHED static
 #else
-# define SHA1DC_DISPATCHED extern
+# define SHA1DC_DISPATCHED
 # if   SHA1DC_BUILD_PORTABLE
 #   define ubc_check_portable ubc_check
 # elif SHA1DC_BUILD_AVX512
@@ -272,21 +276,21 @@ void ubc_check_portable(const uint32_t W[80], uint32_t dvmask[1])
 {
 	size_t i;
 	*dvmask = -1;
-	/* Accumulating directly into *dvmask and not into a local variable like
-	`uint32_t possible = -1;` provides a ~10% throughput boost under GCC for
-	amd64. The reason is that if GCC sees that nothing in this function can
-	modify W, it will sabotage itself by trying to reuse every value (words
-	loaded from `W`, intermediates of the bitwise operations, etc.) that it
-	possibly can. This swamps the register allocator so badly that it will,
-	on several occasions, *read a word from `W`, do nothing to it, and then
-	spill it to the stack*.
+	/* Accumulating directly into `*dvmask` and not into a local variable
+	like `uint32_t possible = -1;` provides a ~10% throughput boost under
+	GCC for amd64. The reason is that if GCC sees that nothing in this
+	function can modify `W`, it will sabotage itself by trying to reuse
+	every value (words loaded from `W`, intermediates of the bitwise
+	operations, etc.) that it possibly can. This swamps the register
+	allocator so badly that it will, on several occasions, *read a word from
+	`W`, do nothing to it, and then spill it to the stack*.
 
-	When *dvmask is the accumulator, and with no __restrict__s around, GCC
-	can't be sure that storing to dvmask won't mutate W, so it will reload W
-	after every update to *dvmask. This avoids the catastrophe, but it is
-	still suboptimal. GCC will still emit real stores to memory for every
-	update to *dvmask, and not reusing *any* values when there are free
-	registers available is probably not ideal either.
+	When `*dvmask` is the accumulator, and with no `__restrict__`s around,
+	GCC can't be sure that writes through `dvmask` won't be visible through
+	`W`, so it will reload values from `W` after each update. This prevents
+	catastrophe, but is still suboptimal. GCC will now emit a real store to
+	memory for every update to `*dvmask`, and not reusing *any* values when
+	there are free registers available is probably not ideal either.
 
 	A slightly better (4-5%) but non-portable way out of this ridiculousness
 	is to accumulate into a local variable but put a compiler barrier like
@@ -315,12 +319,18 @@ void ubc_check_portable(const uint32_t W[80], uint32_t dvmask[1])
 #endif
 
 #if SHA1DC_BUILD_AVX512
-/* These arrays contain the same information as ubcs[], but using byte indices,
-with a bias on those indices (making them relative to the first byte of the
-first used word), with i and j replaced with one-bit-set byte-wide masks and
-everything suitably wrapped up in vectors (a, b, i/m, j/n, and c packed in 64s,
-dvs packed in 16s). Note that the padding (all zeros) is correct (if useless)
-when interpreted as UBC data.                                                */
+/* These arrays contain the same information as `ubcs[]`, but using byte
+indices, with a bias on those indices (making them relative to the first byte of
+the first used word), with `i` and `j` replaced with one-bit-set byte-wide
+masks, and with everything wrapped up in vectors (`a`, `b`, `i`/`m`, `j`/`n`,
+and `c` packed in 64s, `dvs` packed in 16s). Note that the padding (all zeros)
+is correct (if useless) when interpreted as UBC data.
+
+The order of the UBCs is no longer important for early-exiting like it is in
+`ubc_check_portable`. There also happen to be no UBCs that depend on two words
+at a distance greater than 8. Reordering the UBCs for better locality thus might
+allow for a different implementation (maybe a faster one, or one that runs on
+more hardware). This has not been investigated.                               */
 static const unsigned char ubc_bias = 35;
 typedef union { uint8_t  scalar[64]; __m512i vector; } v64u8;
 typedef union { uint32_t scalar[16]; __m512i vector; } v16u32;
@@ -481,8 +491,8 @@ void ubc_check_avx512(const uint32_t W[80], uint32_t dvmask[1])
 {
 	/* This code only produces "ideal" machine code under GCC. A few
 	imperfections are left even then, for brevity and portability. Clang
-	generates measurably worse code, but still beats ubc_check_portable.
-	Most other compilers are probably in the same boat.               */
+	generates measurably worse code, but still beats `ubc_check_portable`.
+	Most other compilers are probably in the same boat.                 */
 	v64u8  w1, w2;
 	v16u32 impossible;
 	v8u32  half0, half1;
@@ -537,7 +547,7 @@ void ubc_check_avx512(const uint32_t W[80], uint32_t dvmask[1])
 				                       neq,
 				                       impossible.vector,
 				                       ubc_dvss[i][j].vector);
-			/* Clang pulls neq into a GPR to do these shifts, and
+			/* Clang pulls `neq` into a GPR to do these shifts, and
 			then pushes the (~4x as many) results back into kregs.
 			This takes so long that almost all the OR operations get
 			pushed together, deinterleaving these two nested loops
@@ -547,18 +557,18 @@ void ubc_check_avx512(const uint32_t W[80], uint32_t dvmask[1])
 			neq = _kshiftri_mask64(neq, 16);
 		}
 	}
-	/* GCC does some silly extraneous movs if given ~_mm512_reduce_or_epi32
-	here, and also fails to fuse the final NOT and OR into a vpternlog NOR.
-	So the reduction is done explicitly. We choose to require AVX-512 VL by
-	using _mm_ternarylogic_epi32/vpternlogd(XMM) instead of
-	_mm512_ternarylogic_epi32/vpternlogd(ZMM) (available with F), because
-	the latter has more port restrictions (on current hardware) and causes a
-	~2% throughput loss. We already depend strongly on VBMI, and cores with
-	VBMI but not VL neither currently exist nor seem likely ever to exist.
-	(vmovd into a GPR has the same problem.)
+	/* GCC does some extraneous movs here if given `~_mm512_reduce_or_epi32`
+	here, and also fails to fuse the final NOT and OR into a `vpternlog`
+	NOR. So the reduction is done explicitly. We require AVX-512 VL by our
+	use of `_mm_ternarylogic_epi32`/`vpternlogd(XMM)` over
+	`_mm512_ternarylogic_epi32`/`vpternlogd(ZMM)` (available with F),
+	because the latter has more port restrictions (on current hardware) and
+	causes a ~2% throughput loss. We already depend strongly on VBMI, and
+	cores with VBMI but not VL neither currently exist nor seem likely ever
+	to exist. (`vmovd` into a GPR has the same problem.)
 
 	For GCC, it is necessary to do the extract before the cast, or else it
-	will insert extraneous movs.                                          */
+	will insert extraneous `mov`s.                                        */
 	half1.vector = _mm512_extracti64x4_epi64(impossible.vector, 1);
 	half0.vector =    _mm512_castsi512_si256(impossible.vector);
 	half0.vector =           _mm256_or_si256(half0.vector, half1.vector);
@@ -572,22 +582,22 @@ void ubc_check_avx512(const uint32_t W[80], uint32_t dvmask[1])
 	stth1.vector = _mm_shuffle_epi32(stth0.vector, _MM_SHUFFLE(2, 3, 0, 1));
 	stth0.vector = _mm_ternarylogic_epi32(_mm_undefined_si128(),
 	                                      stth0.vector, stth1.vector,
-	                                      ~(_MM_TERNLOG_B | _MM_TERNLOG_C));
+	                                      0x01 /* 0b000 => 1; _ => 0 */);
 	dvmask[0] = stth0.scalar[0];
 }
 #endif
 
-#if SHA1DC_BUILD_DISPATCH
+#if SHA1DC_BUILD_DISPATCH_X86
 typedef void           implementation(const uint32_t[80], uint32_t[1]);
 static  implementation ubc_check_dispatched;
 static  int            avx512_supported(void);
 
-/* We need to use _Atomic, but that's C11. */
+/* We'd like to use `_Atomic`, but that's C11. */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
 static implementation *_Atomic ubc_check_chosen = ubc_check_dispatched;
 #pragma GCC diagnostic pop
-/* On GNU/ELF platforms, we could just use [[gnu::ifunc]], and that'd be
+/* On GNU/ELF platforms, we could just use `[[gnu::ifunc]]`, and that'd be
 marginally cheaper in the dynamic library case (just one indirect call, not
 two), but that's a portability mess.                                     */
 
