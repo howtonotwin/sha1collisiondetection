@@ -10,25 +10,25 @@
 UBCs were specifically minimized from the '3565' dataset, also in that
 repository (the name refers to the range W[35], ..., W[65] of W that is used).
 
-A disturbance vector, or DV, is a "plan of attack" by which an adversary may
-try to construct a SHA-1 collision. There are only a few DVs that could
-feasibly used this way, and they have been classified into two types (named I
-and II), with two parameters (k and b) specifying the DV within each type.
-Thus each DV has a "name" of the form I(k,b) or II(k,b). These are the fields
-`dvType`, `dvK`, and `dvB`. Each DV specifies a pattern of bit flips `dm[80]`
-by which the two colliding (expanded) blocks should differ. Each DV also
-specifies a `testt` value, which identifies the stage of the compressor from
-which recompression should commence in order to check for an attack using the
-DV. `maski` and `maskb` specify the bit to check for each DV in the dvmask
-returned by ubc_check (the bits are actually just assigned sequentially).
+A disturbance vector, or DV, is a "plan of attack" by which an adversary may try
+to construct a SHA-1 collision. There are only a few DVs that could feasibly be
+used this way, and they have been classified into two types (named I and II),
+with two parameters (k and b) specifying the DV within each type. Thus each DV
+has a "name" of the form I(k,b) or II(k,b). These are the fields `dvType`,
+`dvK`, and `dvB`. Each DV specifies a pattern of bit flips `dm[80]` by which the
+two colliding (expanded) blocks should differ. Each DV also specifies a `testt`
+value, which identifies the stage of the compressor from which recompression
+should commence in order to check for an attack using the DV. `maski` and
+`maskb` specify the bit to check for each DV in the dvmask returned by ubc_check
+(the bits are actually just assigned sequentially, going down the array of DVs).
 
-For each DV, there are some equations (unavoidable bit conditions, or UBCs,
-each one of the form `(W[a] >> i ^ W[b] >> j) & 1 == c`) that are guaranteed
-to hold for malicious (expanded) message blocks constructed using that DV.
-`ubc_check` takes as input an expanded message block and checks these
-equations, ruling out all the DVs associated to each UBC that fails, and
-returns a bitmask with a set bit for every DV it could not rule out. The
-(expensive!) recompression step has to be done for these remaining DVs.
+For each DV, there are some equations (unavoidable bit conditions, or UBCs, each
+of the form `(W[a] >> i ^ W[b] >> j) & 1 == c`) that are guaranteed to hold for
+malicious (expanded) message blocks constructed using that DV. `ubc_check` takes
+as input an expanded message block and checks these equations, ruling out all the
+DVs associated with each failing UBC, and returns a bitmask with a set bit for
+every DV it could not rule out. The (expensive!) recompression test only has to
+be done for each of these remaining DVs.
 
 All performance numbers mentioned in the comments of this file are in terms of
 total sha1dcsum throughput:
@@ -45,13 +45,25 @@ cycles "in" `ubc_check_portable`, when all hardware-specific variants are
 disabled. Nevertheless, switching the implementation of `ubc_check`, say to a
 fully optimized `ubc_check_avx512`, can increase overall throughput by >50%!  */
 
+#if (   defined __amd64__ || defined __amd64 || defined __x86_64__  \
+     || defined __x86_64  || defined _M_X64  || defined _M_AMD64  ) \
+  && !SHA1DC_DISABLE_AVX512
+# define SHA1DC_BUILD_AVX512   1
+# define SHA1DC_BUILD_DISPATCH !SHA1DC_ALWAYS_AVX512
+# define SHA1DC_BUILD_PORTABLE !SHA1DC_ALWAYS_AVX512
+#else /* elif !defined __amd64__ && ... || SHA1DC_DISABLE_AVX512 */
+# define SHA1DC_BUILD_AVX512   0
+# define SHA1DC_BUILD_PORTABLE 1
+# define SHA1DC_BUILD_DISPATCH 0
+#endif
+
 /* Tweakable setting. If loops marked "#pragma GCC unroll" will be unrolled,
 then setting this to 1 will produce better code. If the affected loops are
 unrolled and this is 0, the code will be fine but slightly suboptimal. If the
 affected loops are not unrolled and this is 1, then their code will be slightly
 *worse* than if this were 0.
 
-This option disables itself when __OPTIMIZE_SIZE_ (i.e. under `-Os`). GCC/Clang
+This option disables itself when __OPTIMIZE_SIZE__ (i.e. under `-Os`). GCC/Clang
 would still obey "#pragma GCC unroll" (after all, some loops get smaller when
 unrolled), but we choose not to produce it. It is never on for other compilers
 that may not heed "#pragma GCC unroll" (e.g. MSVC), since they are unlikely to
@@ -61,12 +73,58 @@ figure out that it's good to unroll these loops on their own.                */
 #  define SHA1DC_UNROLLING_LOOPS 1
 #endif
 
+#ifndef SHA1DC_HAVE_STDATOMIC
+#  if  __GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ >= 9                \
+    || __clang_major__ > 3 || __clang_major__ == 3 && __clang_minor__ >= 2 \
+    || __STDC_VERSION__ >= 201112L /* NB: MSVC demands C11 for _Atomic */
+#   define SHA1DC_HAVE_STDATOMIC 1
+#  else
+#   define SHA1DC_HAVE_STDATOMIC 0
+#  endif
+#endif
+
 #ifndef SHA1DC_NO_STANDARD_INCLUDES
-#include <stddef.h>
-#include <stdint.h>
+# include <stddef.h>
+# include <stdint.h>
+# if SHA1DC_BUILD_AVX512
+#   include <immintrin.h>
+# endif
+# if SHA1DC_BUILD_DISPATCH
+#   if   __GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ >= 4 \
+      || __clang_major__ >= 9
+#     include <cpuid.h>
+#     define cpuid(regs, leaf, subleaf)                                   \
+        __get_cpuid_count(leaf, subleaf, /* no __cpuidex on old GCC */    \
+                          &(regs)[0], &(regs)[1], &(regs)[2], &(regs)[3])
+#   elif _MSC_VER >= 1400
+#     include <intrin.h>
+#     define cpuid(regs, leaf, subleaf) __cpuidex(regs, leaf, subleaf)
+#   else
+#     warning "Runtime AVX-512 detection needs GCC/Clang or MSVC CPUID "   \
+              "intrinsics. For unsupported compilers, please pass either " \
+              "-DSHA1DC_DISABLE_AVX512=1 or -DSHA1DC_ALWAYS_AVX512=1."
+#   endif
+#   ifdef __clang__
+      /* Clang has a problem with its <immintrin.h>'s _xgetbv. */
+#     define xgetbv(xcr) \
+        _Pragma("clang diagnostic push")                    \
+        _Pragma("clang diagnostic ignored \"-Wlong-long\"") \
+        _xgetbv(xcr)                                        \
+        _Pragma("clang diagnostic pop")
+#   else
+#     define xgetbv(xcr) _xgetbv(xcr)
+#   endif
+#   if SHA1DC_HAVE_STDATOMIC
+#     include <stdatomic.h>
+#   else
+#     warning "Runtime AVX-512 detection needs C11 <stdatomic.h>/_Atomic " \
+              "support. For unsupported environments, please pass either " \
+              "-DSHA1DC_DISABLE_AVX512=1 or -DSHA1DC_ALWAYS_AVX512=1."
+#   endif
+# endif
 #endif
 #ifdef SHA1DC_CUSTOM_INCLUDE_UBC_CHECK_C
-#include SHA1DC_CUSTOM_INCLUDE_UBC_CHECK_C
+# include SHA1DC_CUSTOM_INCLUDE_UBC_CHECK_C
 #endif
 #include "ubc_check.h"
 
@@ -197,7 +255,20 @@ static const struct ubc ubcs[] = {
 	{36, 37,  4,  4, 1, 0x00000800}, {36, 40,  3, 28, 0, 0x00100000},
 	{40, 44,  4, 29, 0, 0x08000000}, {37, 38,  4,  4, 1, 0x00002000}};
 
-void ubc_check(const uint32_t W[80], uint32_t dvmask[1])
+#if SHA1DC_BUILD_DISPATCH
+# define SHA1DC_DISPATCHED static
+#else
+# define SHA1DC_DISPATCHED extern
+# if   SHA1DC_BUILD_PORTABLE
+#   define ubc_check_portable ubc_check
+# elif SHA1DC_BUILD_AVX512
+#   define ubc_check_avx512   ubc_check
+# endif
+#endif
+
+#if SHA1DC_BUILD_PORTABLE
+SHA1DC_DISPATCHED
+void ubc_check_portable(const uint32_t W[80], uint32_t dvmask[1])
 {
 	size_t i;
 	*dvmask = -1;
@@ -215,13 +286,13 @@ void ubc_check(const uint32_t W[80], uint32_t dvmask[1])
 	after every update to *dvmask. This avoids the catastrophe, but it is
 	still suboptimal. GCC will still emit real stores to memory for every
 	update to *dvmask, and not reusing *any* values when there are free
-	registers for them is probably not ideal.
+	registers available is probably not ideal either.
 
 	A slightly better (4-5%) but non-portable way out of this ridiculousness
-	is to use a local variable accumulator and put a compiler barrier like
-	`__asm__ volatile("" : "+g"(accumulator))` in the loop. This will force
-	GCC to be (still somewhat excessively) conservative about reusing work,
-	but doesn't insert any extraneous operations. We don't do this here.  */
+	is to accumulate into a local variable but put a compiler barrier like
+	`__asm__ volatile("" : "+g"(possible))` in the loop. This will force GCC
+	to be (still somewhat excessively) conservative about reusing work, but
+	doesn't insert any extraneous operations. We don't do this here.      */
 #if SHA1DC_UNROLLING_LOOPS
 #pragma GCC unroll sizeof ubcs / sizeof *ubcs
 #endif
@@ -241,6 +312,337 @@ void ubc_check(const uint32_t W[80], uint32_t dvmask[1])
 		if(i == 64 && !*dvmask) break;
 	}
 }
+#endif
+
+#if SHA1DC_BUILD_AVX512
+/* These arrays contain the same information as ubcs[], but using byte indices,
+with a bias on those indices (making them relative to the first byte of the
+first used word), with i and j replaced with one-bit-set byte-wide masks and
+everything suitably wrapped up in vectors (a, b, i/m, j/n, and c packed in 64s,
+dvs packed in 16s). Note that the padding (all zeros) is correct (if useless)
+when interpreted as UBC data.                                                */
+static const unsigned char ubc_bias = 35;
+typedef union { uint8_t  scalar[64]; __m512i vector; } v64u8;
+typedef union { uint32_t scalar[16]; __m512i vector; } v16u32;
+typedef union { uint32_t scalar[ 8]; __m256i vector; } v8u32;
+typedef union { uint32_t scalar[ 4]; __m128i vector; } v4u32;
+typedef __mmask64 /* union { bool[64]; uint64_t; } */  v64s1;
+static const v64u8 ubc_as[] = {
+	{{ 39,  32,  36,  55,  48,   4,  47,  16,
+	   20,  24,  23,  51,  59,  40,  36,  43,
+	   40,  44,  24,  28,   0,  16,  20,  20,
+	    8,  24,  12,  28,  32,  36,  52,  44,
+	   48,  71,  28,  35,   8,  52,  48,  63,
+	   12,  31,   8,  40,  79,  44, 104,  67,
+	   16,  60,  12,  40,   8,  44,  56,  60,
+	   75,  20,  39,  83,  28,  24,   4,  16}},
+	{{ 52,  12,   4,   4,   8,  27,  20,  16,
+	    0,  48,  60,  64,  64,  68,  76, 108,
+	  112,  12,  16,  43,  32,  56,   8,  64,
+	   68,  68,  72,  72, 100,  80,  87,  55,
+	   67,  56,  51,  72,  76,  80,  84,  91,
+	   92, 112,  47,  63,  75,   0,  87,  64,
+	   96,  96, 104,  12,  95,  24,   8,  32,
+	  100, 104, 108,  59,  20,  28,  80,  83}},
+	{{ 88,   0, 100, 108, 112,  12,   7,  88,
+	   92,  99,  96,  15,  36,  71,  12,  19,
+	   32,   8,  28,   3,  36,  24,  11,  16,
+	    4,   4,  20,   8
+
+
+
+	                                        }}};
+static const v64u8 ubc_bs[] = {
+	{{ 43,  47,  51,  59,  63,   8,  51,  20,
+	   24,  28,  27,  55,  63,  48,  44,  47,
+	   55,  59,  28,  32,   4,  31,  24,  35,
+	   23,  39,  27,  36,  40,  40,  67,  48,
+	   52,  75,  43,  39,  12,  60,  56,  67,
+	   16,  35,  27,  48,  83,  52, 108,  71,
+	   24,  75,  20,  44,  12,  52,  71,  64,
+	   79,  28,  47,  87,  60,  32,   8,  35}},
+	{{ 56,  31,  23,  12,  16,  31,  28,  20,
+	   19,  64,  76,  79,  80,  84,  91, 112,
+	  116,  20,  35,  51,  64,  60,   8,  72,
+	   76,  83,  80,  87, 104,  95,  91,  63,
+	   75,  64,  59,  76,  80,  84,  99,  95,
+	   96, 116,  55,  71,  87,  19,  99,  68,
+	  100, 115, 108,  31,  99,  43,  27,  51,
+	  119, 108, 112,  67,  39,  47,  88,  91}},
+	{{ 99,  19, 119, 112, 116,  31,   8, 107,
+	  111, 103, 115,  16,  55,  79,  16,  20,
+	   51,  27,  47,   4,  55,  43,  12,  35,
+	    8,  23,  39,  12
+
+
+
+	                                        }}};
+static const v64u8 ubc_ms[] = {
+	{{1 << 5, 1 << 4, 1 << 4, 1 << 5, 1 << 4, 1 << 1, 1 << 5, 1 << 1,
+	  1 << 1, 1 << 1, 1 << 5, 1 << 5, 1 << 5, 1 << 6, 1 << 6, 1 << 5,
+	  1 << 4, 1 << 4, 1 << 6, 1 << 6, 1 << 1, 1 << 4, 1 << 6, 1 << 4,
+	  1 << 4, 1 << 4, 1 << 4, 1 << 6, 1 << 6, 1 << 1, 1 << 4, 1 << 6,
+	  1 << 6, 1 << 5, 1 << 4, 1 << 5, 1 << 1, 1 << 6, 1 << 6, 1 << 5,
+	  1 << 0, 1 << 5, 1 << 5, 1 << 1, 1 << 5, 1 << 6, 1 << 2, 1 << 5,
+	  1 << 4, 1 << 4, 1 << 1, 1 << 6, 1 << 0, 1 << 1, 1 << 4, 1 << 6,
+	  1 << 5, 1 << 4, 1 << 5, 1 << 5, 1 << 1, 1 << 6, 1 << 0, 1 << 5}},
+	{{1 << 6, 1 << 5, 1 << 4, 1 << 4, 1 << 4, 1 << 5, 1 << 6, 1 << 6,
+	  1 << 5, 1 << 1, 1 << 1, 1 << 4, 1 << 1, 1 << 1, 1 << 4, 1 << 2,
+	  1 << 2, 1 << 4, 1 << 4, 1 << 5, 1 << 1, 1 << 6, 1 << 1, 1 << 6,
+	  1 << 6, 1 << 4, 1 << 6, 1 << 4, 1 << 0, 1 << 4, 1 << 5, 1 << 5,
+	  1 << 5, 1 << 6, 1 << 5, 1 << 6, 1 << 6, 1 << 6, 1 << 4, 1 << 5,
+	  1 << 0, 1 << 1, 1 << 5, 1 << 5, 1 << 5, 1 << 4, 1 << 5, 1 << 6,
+	  1 << 0, 1 << 5, 1 << 0, 1 << 4, 1 << 5, 1 << 3, 1 << 4, 1 << 4,
+	  1 << 5, 1 << 1, 1 << 0, 1 << 5, 1 << 3, 1 << 4, 1 << 4, 1 << 5}},
+	{{1 << 4, 1 << 3, 1 << 4, 1 << 1, 1 << 0, 1 << 3, 1 << 6, 1 << 4,
+	  1 << 4, 1 << 5, 1 << 4, 1 << 6, 1 << 3, 1 << 5, 1 << 4, 1 << 6,
+	  1 << 3, 1 << 3, 1 << 3, 1 << 6, 1 << 4, 1 << 4, 1 << 6, 1 << 3,
+	  1 << 4, 1 << 3, 1 << 4, 1 << 4
+
+
+
+	                                                                }}};
+static const v64u8 ubc_ns[] = {
+	{{1 << 5, 1 << 5, 1 << 5, 1 << 5, 1 << 5, 1 << 6, 1 << 5, 1 << 6,
+	  1 << 6, 1 << 6, 1 << 5, 1 << 5, 1 << 5, 1 << 6, 1 << 6, 1 << 5,
+	  1 << 5, 1 << 5, 1 << 1, 1 << 1, 1 << 6, 1 << 5, 1 << 1, 1 << 5,
+	  1 << 5, 1 << 5, 1 << 5, 1 << 6, 1 << 6, 1 << 6, 1 << 5, 1 << 1,
+	  1 << 1, 1 << 5, 1 << 5, 1 << 5, 1 << 6, 1 << 6, 1 << 6, 1 << 5,
+	  1 << 5, 1 << 5, 1 << 6, 1 << 1, 1 << 5, 1 << 6, 1 << 7, 1 << 5,
+	  1 << 4, 1 << 5, 1 << 1, 1 << 1, 1 << 5, 1 << 1, 1 << 5, 1 << 1,
+	  1 << 5, 1 << 4, 1 << 5, 1 << 5, 1 << 1, 1 << 6, 1 << 5, 1 << 6}},
+	{{1 << 1, 1 << 6, 1 << 5, 1 << 4, 1 << 4, 1 << 5, 1 << 6, 1 << 1,
+	  1 << 6, 1 << 1, 1 << 1, 1 << 5, 1 << 1, 1 << 1, 1 << 5, 1 << 7,
+	  1 << 7, 1 << 4, 1 << 5, 1 << 5, 1 << 1, 1 << 1, 1 << 6, 1 << 6,
+	  1 << 6, 1 << 5, 1 << 6, 1 << 5, 1 << 5, 1 << 5, 1 << 5, 1 << 5,
+	  1 << 5, 1 << 6, 1 << 5, 1 << 1, 1 << 1, 1 << 1, 1 << 5, 1 << 5,
+	  1 << 5, 1 << 6, 1 << 5, 1 << 5, 1 << 5, 1 << 5, 1 << 5, 1 << 1,
+	  1 << 5, 1 << 6, 1 << 5, 1 << 5, 1 << 5, 1 << 4, 1 << 5, 1 << 5,
+	  1 << 6, 1 << 6, 1 << 5, 1 << 5, 1 << 4, 1 << 5, 1 << 4, 1 << 5}},
+	{{1 << 5, 1 << 4, 1 << 5, 1 << 6, 1 << 5, 1 << 4, 1 << 3, 1 << 5,
+	  1 << 5, 1 << 5, 1 << 5, 1 << 3, 1 << 4, 1 << 5, 1 << 4, 1 << 3,
+	  1 << 4, 1 << 4, 1 << 4, 1 << 3, 1 << 5, 1 << 5, 1 << 3, 1 << 4,
+	  1 << 4, 1 << 4, 1 << 5, 1 << 4
+
+
+
+	                                                                }}};
+static const v64s1 ubc_cs[] = {
+	0x56354910201003a0,
+	0xce055f05901bb618,
+	         0x948e858};
+static const v16u32 ubc_dvss[][4] = {
+	{{{0x0283a080, 0x08080225, 0x1010088a, 0x60a08004,
+	   0x82012220, 0x00041040, 0x18180801, 0x00401010,
+	   0x01004040, 0x04040100, 0x800a00a2, 0x30302002,
+	   0xc2810008, 0x00004440, 0x00001110, 0x0a0a8200}},
+	 {{0x20202224, 0x40808888, 0x01004000, 0x04040000,
+	   0x00000410, 0x40100205, 0x00401000, 0x8020080a,
+	   0x50020021, 0x00812025, 0xa0080082, 0x00000110,
+	   0x00000440, 0x00404000, 0x08028880, 0x01000010}},
+	 {{0x04000040, 0x30110200, 0x0202808a, 0x00a12820,
+	   0x00004100, 0x00041000, 0x00004400, 0x8a020020,
+	   0x04000000, 0x00300a08, 0x00400000, 0x01000000,
+	   0xc0882000, 0x00001100, 0x00040010, 0x18080080}},
+	 {{0x40000005, 0x20128800, 0x00000400, 0x00400000,
+	   0x01000000, 0x04000000, 0x10092200, 0x00041000,
+	   0x60220800, 0x8000000a, 0x00000025, 0x82108000,
+	   0x00000400, 0x00000040, 0x00400000, 0x04000000}}},
+	{{{0x00000100, 0x01000000, 0x00110208, 0x28000000,
+	   0x50000001, 0x00180284, 0x00000010, 0x00000400,
+	   0x00004000, 0x00040000, 0x00400000, 0x40282000,
+	   0x01000000, 0x04000000, 0x08800000, 0x00000040}},
+	 {{0x00000100, 0xa0000002, 0x02008000, 0x0000008a,
+	   0x00001000, 0x00000400, 0x00004000, 0x00400000,
+	   0x01000000, 0x80908000, 0x04000000, 0x02200000,
+	   0x00010004, 0x12000000, 0x08200000, 0x00002220}},
+	 {{0x00028800, 0x00004000, 0x00000888, 0x00400000,
+	   0x01000000, 0x04000000, 0x28000000, 0x10800000,
+	   0x00000001, 0x00010004, 0x00000224, 0x00012200,
+	   0x00308000, 0x00080084, 0x0a000000, 0x00004000}},
+	 {{0x00000002, 0x00000001, 0x00020008, 0x00802000,
+	   0x22000000, 0x10000000, 0x00200800, 0x40000000,
+	   0x00000002, 0x00000001, 0x00080020, 0x00008880,
+	   0x08000000, 0x20000000, 0x10000000, 0x00800000}}},
+	{{{0x40000000, 0x00082000, 0x80000000, 0x00000002,
+	   0x00100080, 0x00800000, 0x00200000, 0x10000000,
+	   0x20000000, 0x08000000, 0x40000000, 0x02000000,
+	   0x80000000, 0x00082000, 0x00008000, 0x08000000}},
+	 {{0x40000000, 0x00200000, 0x20000000, 0x00100000,
+	   0x80000000, 0x10000000, 0x00800000, 0x02000000,
+	   0x00000800, 0x00100000, 0x08000000, 0x00002000,
+	                                                 }}
+	 /* further padding suppressed */}};
+SHA1DC_DISPATCHED
+#ifdef __GNUC__
+__attribute__((target("avx512f,avx512bw,avx512vl,avx512vbmi")))
+#endif
+void ubc_check_avx512(const uint32_t W[80], uint32_t dvmask[1])
+{
+	/* This code only produces "ideal" machine code under GCC. A few
+	imperfections are left even then, for brevity and portability. Clang
+	generates measurably worse code, but still beats ubc_check_portable.
+	Most other compilers are probably in the same boat.               */
+	v64u8  w1, w2;
+	v16u32 impossible;
+	v8u32  half0, half1;
+	v4u32  qrtr0, qrtr1,
+	       eith0, eith1,
+	       stth0, stth1;
+	size_t i, j;
+
+	w1.vector = _mm512_loadu_epi32((const char*)&W[ubc_bias]);
+	w2.vector = _mm512_loadu_epi32((const char*)&W[ubc_bias] + sizeof w1);
+#if !SHA1DC_UNROLLING_LOOPS
+	impossible.vector = _mm512_setzero_epi32();
+#endif
+
+#if SHA1DC_UNROLLING_LOOPS
+#pragma GCC unroll sizeof ubc_as / sizeof *ubc_as
+#endif
+	for(i = 0; i < sizeof ubc_as / sizeof *ubc_as; i++) {
+		v64u8 x,  y;
+		v64s1 b1, b2, neq, c = _cvtu64_mask64(ubc_cs[i]);
+
+		x.vector = _mm512_permutex2var_epi8(w1.vector,
+		                                    ubc_as[i].vector,
+		                                    w2.vector);
+		y.vector = _mm512_permutex2var_epi8(w1.vector,
+		                                    ubc_bs[i].vector,
+		                                    w2.vector);
+		b1  = _mm512_test_epi8_mask(x.vector, ubc_ms[i].vector);
+		b2  = _mm512_test_epi8_mask(y.vector, ubc_ns[i].vector);
+		neq = _kxor_mask64(_kxor_mask64(b1, b2), c);
+#if SHA1DC_UNROLLING_LOOPS
+#pragma GCC unroll 4
+#endif
+		for(j = 0; j < 4; j++) {
+#if SHA1DC_UNROLLING_LOOPS
+			/* Don't process pure padding. */
+			if(64 * i + 16 * j >= sizeof ubcs / sizeof *ubcs)
+				break;
+			if(!i && !j)
+				impossible.vector = _mm512_maskz_load_epi32
+				                      (neq, &ubc_dvss[i][j]);
+			else
+#else
+			if(1)
+#endif
+				/* GCC inserts some useless movs here that can
+				be dealt with by replacing the intrinsic with
+				inline ASM. There doesn't seem to be a great
+				need for that, though.                      */
+				impossible.vector = _mm512_mask_or_epi32
+				                      (impossible.vector,
+				                       neq,
+				                       impossible.vector,
+				                       ubc_dvss[i][j].vector);
+			/* Clang pulls neq into a GPR to do these shifts, and
+			then pushes the (~4x as many) results back into kregs.
+			This takes so long that almost all the OR operations get
+			pushed together, deinterleaving these two nested loops
+			into two blocks in series, one computing `neq` and then
+			one computing `impossible`. Clang ends up ~10% slower
+			than GCC. Workaround TBD.                             */
+			neq = _kshiftri_mask64(neq, 16);
+		}
+	}
+	/* GCC does some silly extraneous movs if given ~_mm512_reduce_or_epi32
+	here, and also fails to fuse the final NOT and OR into a vpternlog NOR.
+	So the reduction is done explicitly. We choose to require AVX-512 VL by
+	using _mm_ternarylogic_epi32/vpternlogd(XMM) instead of
+	_mm512_ternarylogic_epi32/vpternlogd(ZMM) (available with F), because
+	the latter has more port restrictions (on current hardware) and causes a
+	~2% throughput loss. We already depend strongly on VBMI, and cores with
+	VBMI but not VL neither currently exist nor seem likely ever to exist.
+	(vmovd into a GPR has the same problem.)
+
+	For GCC, it is necessary to do the extract before the cast, or else it
+	will insert extraneous movs.                                          */
+	half1.vector = _mm512_extracti64x4_epi64(impossible.vector, 1);
+	half0.vector =    _mm512_castsi512_si256(impossible.vector);
+	half0.vector =           _mm256_or_si256(half0.vector, half1.vector);
+	qrtr1.vector =  _mm256_extracti128_si256(half0.vector, 1);
+	qrtr0.vector =    _mm256_castsi256_si128(half0.vector);
+	qrtr0.vector =              _mm_or_si128(qrtr0.vector, qrtr1.vector);
+	eith0        = qrtr0;
+	eith1.vector = _mm_shuffle_epi32(eith0.vector, _MM_SHUFFLE(1, 0, 3, 2));
+	eith0.vector =      _mm_or_si128(eith0.vector, eith1.vector);
+	stth0        = eith0;
+	stth1.vector = _mm_shuffle_epi32(stth0.vector, _MM_SHUFFLE(2, 3, 0, 1));
+	stth0.vector = _mm_ternarylogic_epi32(_mm_undefined_si128(),
+	                                      stth0.vector, stth1.vector,
+	                                      ~(_MM_TERNLOG_B | _MM_TERNLOG_C));
+	dvmask[0] = stth0.scalar[0];
+}
+#endif
+
+#if SHA1DC_BUILD_DISPATCH
+typedef void           implementation(const uint32_t[80], uint32_t[1]);
+static  implementation ubc_check_dispatched;
+static  int            avx512_supported(void);
+
+/* We need to use _Atomic, but that's C11. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+static implementation *_Atomic ubc_check_chosen = ubc_check_dispatched;
+#pragma GCC diagnostic pop
+/* On GNU/ELF platforms, we could just use [[gnu::ifunc]], and that'd be
+marginally cheaper in the dynamic library case (just one indirect call, not
+two), but that's a portability mess.                                     */
+
+void ubc_check(const uint32_t W[80], uint32_t dvmask[1])
+{
+	atomic_load_explicit(&ubc_check_chosen, memory_order_relaxed)
+	                    (W, dvmask);
+}
+static void ubc_check_dispatched(const uint32_t W[80], uint32_t dvmask[1])
+{
+	implementation *chosen = avx512_supported() ? ubc_check_avx512
+	                                            : ubc_check_portable;
+	atomic_store_explicit(&ubc_check_chosen, chosen, memory_order_relaxed);
+	chosen(W, dvmask);
+}
+
+#ifdef __GNUC__
+__attribute__((target("xsave")))
+#endif
+static int avx512_supported(void)
+{
+	unsigned int regs[4] = {0};
+	static const unsigned int
+		max_needed_leaf = 7,
+		l1c_needs       = 1u << 27 /* OSXSAVE         */,
+		l7s0b_needs     = 1u << 16 /* AVX-512 F       */
+		                | 1u << 30 /* AVX-512 BW      */
+		                | 1u << 31 /* AVX-512 VL      */,
+		l7s0c_needs     = 1u <<  1 /* AVX-512 VBMI    */,
+		xsave_needs     = 1u <<  1 /* SSE state (XMM) */
+		                | 1u <<  2 /* YMM             */
+		                | 1u <<  5 /* kregs           */
+		                | 1u <<  6 /* first ZMMs      */
+		                | 1u <<  7 /* later ZMMs      */;
+
+	cpuid(regs, 0, 0);
+	if(regs[0] < max_needed_leaf)
+		return 0;
+
+	cpuid(regs, 1, 0);
+	if((regs[2] & l1c_needs) != l1c_needs)
+		return 0;
+
+	if((xgetbv(0) & xsave_needs) != xsave_needs)
+		return 0;
+
+	cpuid(regs, 7, 0);
+	if((regs[1] & l7s0b_needs) != l7s0b_needs)
+		return 0;
+	if((regs[2] & l7s0c_needs) != l7s0c_needs)
+		return 0;
+
+	return 1;
+}
+#endif
 
 #ifdef SHA1DC_CUSTOM_TRAILING_INCLUDE_UBC_CHECK_C
 #include SHA1DC_CUSTOM_TRAILING_INCLUDE_UBC_CHECK_C
