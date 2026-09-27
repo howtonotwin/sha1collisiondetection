@@ -202,6 +202,10 @@ dv_info_t sha1_dvs[] =
 , {0,0,0,0,0,0, {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}}
 };
 
+#ifdef _MSC_VER
+# pragma warning(push)
+# pragma warning(disable : 4820 /* "padding added in struct" */)
+#endif
 struct ubc {
 	/* indices of words `W[a]` and `W[b]` containing the relevant bits */
 	unsigned char a, b;
@@ -212,6 +216,9 @@ struct ubc {
 	/* set of DVs whose use would imply this equation */
 	uint32_t      dvs;
 };
+#ifdef _MSC_VER
+# pragma warning(pop)
+#endif
 static const struct ubc ubcs[] = {
 	{44, 45, 29, 29, 0, 0x0283a080}, {43, 46,  4, 29, 0, 0x08080225},
 	{44, 47,  4, 29, 0, 0x1010088a}, {48, 49, 29, 29, 0, 0x60a08004},
@@ -308,7 +315,7 @@ SHA1DC_DISPATCHED
 void ubc_check_portable(const uint32_t W[80], uint32_t dvmask[1])
 {
 	size_t i;
-	*dvmask = -1;
+	*dvmask = (uint32_t)-1;
 	/* Accumulating directly into `*dvmask` and not into a local variable
 	like `uint32_t possible = -1;` provides a ~10% throughput boost under
 	GCC for amd64. The reason is that if GCC sees that nothing in this
