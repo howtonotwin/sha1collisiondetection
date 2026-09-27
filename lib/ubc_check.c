@@ -40,18 +40,6 @@ pv data | bin/sha1dcsum -  # observe throughput
 Only percentages (i.e. relative quantities) are reported, in the interest of
 maintaining some degree of hardware-independence.                             */
 
-#if (   defined __amd64__ || defined __amd64 || defined __x86_64__  \
-     || defined __x86_64  || defined _M_X64  || defined _M_AMD64  ) \
-  && !SHA1DC_DISABLE_AVX512
-# define SHA1DC_BUILD_AVX512       1
-# define SHA1DC_BUILD_DISPATCH_X86 !SHA1DC_ALWAYS_AVX512
-# define SHA1DC_BUILD_PORTABLE     !SHA1DC_ALWAYS_AVX512
-#else /* elif !defined __amd64__ && ... || SHA1DC_DISABLE_AVX512 */
-# define SHA1DC_BUILD_AVX512       0
-# define SHA1DC_BUILD_DISPATCH_X86 0
-# define SHA1DC_BUILD_PORTABLE     1
-#endif
-
 /* Tweakable setting. If loops marked `#pragma GCC unroll` will be unrolled,
 then setting this to 1 will produce better code. If the affected loops are
 unrolled and this is 0, the code will be fine but slightly suboptimal. If the
@@ -63,41 +51,90 @@ GCC/Clang would still obey `#pragma GCC unroll` (after all, some loops get
 smaller when unrolled), but we choose not to produce it. It is never on for
 other compilers that may not heed `#pragma GCC unroll` (e.g. MSVC), since they
 are unlikely to figure out that it's good to unroll these loops on their own. */
-#if  !defined SHA1DC_UNROLLING_LOOPS \
-  && defined __GNUC__ && __OPTIMIZE__ && !__OPTIMIZE_SIZE__
-#  define SHA1DC_UNROLLING_LOOPS 1
+#ifndef SHA1DC_UNROLLING_LOOPS
+# if defined __GNUC__ && __OPTIMIZE__ && !__OPTIMIZE_SIZE__
+#   define SHA1DC_UNROLLING_LOOPS 1
+# else
+#   define SHA1DC_UNROLLING_LOOPS 0
+# endif
 #endif
 
 #ifndef SHA1DC_HAVE_STDATOMIC
-#  if  __GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ >= 9                \
-    || __clang_major__ > 3 || __clang_major__ == 3 && __clang_minor__ >= 2 \
-    || __STDC_VERSION__ >= 201112L
+# if       defined __GNUC__                                       \
+        && (__GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ >= 9) \
+     ||    defined __clang__                                      \
+        && (  __clang_major__ > 3                                 \
+           || __clang_major__ == 3 && __clang_minor__ >= 2)       \
+     || defined __STDC_VERSION__ && __STDC_VERSION__ >= 201112L
 #   define SHA1DC_HAVE_STDATOMIC 1
-#  else
+# else
 #   define SHA1DC_HAVE_STDATOMIC 0
-#  endif
+# endif
+#endif
+
+/* Compilers define __AVX512*__ when given e.g. `-mavx512f` etc. on the command
+line. They are a request from the user to use the instructions freely, without
+any runtime dispatch. SHA1DC_ALWAYS_AVX512 may also be set explicitly.       */
+#ifndef SHA1DC_ALWAYS_AVX512
+# if    defined __AVX512F__  && defined __AVX512BW__             \
+     && defined __AVX512VL__ && defined __AVX512VBMI__           \
+     && (!defined SHA1DC_ENABLE_AVX512 || SHA1DC_ENABLE_AVX512)
+#   define SHA1DC_ALWAYS_AVX512 1
+# else
+#   define SHA1DC_ALWAYS_AVX512 0
+# endif
+#endif
+#if SHA1DC_ALWAYS_AVX512 && !defined SHA1DC_ENABLE_AVX512
+# define SHA1DC_ENABLE_AVX512 1
+#endif
+
+/* Should the AVX-512 code be built? */
+#ifndef SHA1DC_ENABLE_AVX512
+# if    defined __GNUC__  && defined __x86_64__ && __GNUC__        >= 7     \
+     || defined __clang__ && defined __x86_64__ && __clang_major__ >= 4     \
+     || defined _MSC_VER  && defined _M_X64     && _MSC_VER        >= 1924
+#   define SHA1DC_ENABLE_AVX512 1
+# else
+#   define SHA1DC_ENABLE_AVX512 0
+# endif
+#endif
+/* Should the non-architecture-specific standard C code be built? */
+#ifndef SHA1DC_ENABLE_PORTABLE
+# if !SHA1DC_ALWAYS_AVX512
+#   define SHA1DC_ENABLE_PORTABLE 1
+# else
+#   define SHA1DC_ENABLE_PORTABLE 0
+# endif
+#endif
+/* Should ubc_check dispatch at runtime based on x86 processor features? */
+#ifndef SHA1DC_ENABLE_DISPATCH_X86
+# if SHA1DC_ENABLE_AVX512 && SHA1DC_ENABLE_PORTABLE
+#   define SHA1DC_ENABLE_DISPATCH_X86 1
+# else
+#   define SHA1DC_ENABLE_DISPATCH_X86 0
+# endif
 #endif
 
 #ifndef SHA1DC_NO_STANDARD_INCLUDES
 # include <stddef.h>
 # include <stdint.h>
-# if SHA1DC_BUILD_AVX512
+# if SHA1DC_ENABLE_AVX512
 #   include <immintrin.h>
 # endif
-# if SHA1DC_BUILD_DISPATCH_X86
-#   if   __GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ >= 4 \
-      || __clang_major__ >= 9
+# if SHA1DC_ENABLE_DISPATCH_X86
+#   ifdef __GNUC__
 #     include <cpuid.h>
 #     define cpuid(regs, leaf, subleaf)                                   \
-        __get_cpuid_count(leaf, subleaf, /* no `__cpuidex` on old GCC */  \
+        __get_cpuid_count(leaf, subleaf, /* No `__cpuidex` on old GCC */  \
                           &(regs)[0], &(regs)[1], &(regs)[2], &(regs)[3])
-#   elif _MSC_VER >= 1400
+#   elif defined _MSC_VER
 #     include <intrin.h>
 #     define cpuid(regs, leaf, subleaf) __cpuidex(regs, leaf, subleaf)
-#   else
-#     warning "Runtime AVX-512 detection needs GCC/Clang or MSVC CPUID "   \
-              "intrinsics. For unsupported compilers, please pass either " \
-              "`-DSHA1DC_DISABLE_AVX512=1` or `-DSHA1DC_ALWAYS_AVX512=1`."
+#   elif !defined cpuid
+#     warning "Runtime AVX-512 detection is only supported with GCC/Clang or "
+              "MSVC CPUID intrinsics. For unsupported compilers, please pass " \
+              "`-DSHA1DC_ENABLE_AVX512=0` or `-DSHA1DC_ALWAYS_AVX512=1`, or "  \
+              "define a `cpuid` macro yourself."
 #   endif
 #   ifdef __clang__
       /* Clang has a problem with its `<immintrin.h>`'s `_xgetbv`. */
@@ -117,6 +154,7 @@ are unlikely to figure out that it's good to unroll these loops on their own. */
       (and thus in the pre-"data races are UB" era), we can just do normal loads
       and stores and expect that to be fine. (This case covers current MSVC,
       which only exposes `_Atomic` at `/std:c11`.)                            */
+#     define _Atomic                                  volatile
 #     define atomic_load_explicit(ptr, order)         0[ptr]
 #     define atomic_store_explicit(ptr, value, order) (0[ptr] = value, (void)0)
 #   endif
@@ -254,18 +292,18 @@ static const struct ubc ubcs[] = {
 	{36, 37,  4,  4, 1, 0x00000800}, {36, 40,  3, 28, 0, 0x00100000},
 	{40, 44,  4, 29, 0, 0x08000000}, {37, 38,  4,  4, 1, 0x00002000}};
 
-#if SHA1DC_BUILD_DISPATCH_X86
+#if SHA1DC_ENABLE_DISPATCH_X86
 # define SHA1DC_DISPATCHED static
 #else
 # define SHA1DC_DISPATCHED
-# if   SHA1DC_BUILD_PORTABLE
+# if   SHA1DC_ENABLE_PORTABLE
 #   define ubc_check_portable ubc_check
-# elif SHA1DC_BUILD_AVX512
+# elif SHA1DC_ENABLE_AVX512
 #   define ubc_check_avx512   ubc_check
 # endif
 #endif
 
-#if SHA1DC_BUILD_PORTABLE
+#if SHA1DC_ENABLE_PORTABLE
 SHA1DC_DISPATCHED
 void ubc_check_portable(const uint32_t W[80], uint32_t dvmask[1])
 {
@@ -313,7 +351,7 @@ void ubc_check_portable(const uint32_t W[80], uint32_t dvmask[1])
 }
 #endif
 
-#if SHA1DC_BUILD_AVX512
+#if SHA1DC_ENABLE_AVX512
 /* These arrays contain the same information as `ubcs[]`, but using byte
 indices, with a bias on those indices (making them relative to the first byte of
 the first used word), with `i` and `j` replaced with one-bit-set byte-wide
@@ -582,12 +620,12 @@ void ubc_check_avx512(const uint32_t W[80], uint32_t dvmask[1])
 }
 #endif
 
-#if SHA1DC_BUILD_DISPATCH_X86
+#if SHA1DC_ENABLE_DISPATCH_X86
 typedef void           implementation(const uint32_t[80], uint32_t[1]);
 static  implementation ubc_check_dispatched;
 static  int            avx512_supported(void);
 
-/* We'd like to use `_Atomic`, but that's C11. */
+/* We'd like to use `_Atomic`, but that's C11 (unless we redefined it). */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
 static implementation *_Atomic ubc_check_chosen = ubc_check_dispatched;
