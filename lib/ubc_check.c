@@ -129,7 +129,7 @@ any runtime dispatch. SHA1DC_ALWAYS_AVX512 may also be set explicitly.       */
                           &(regs)[0], &(regs)[1], &(regs)[2], &(regs)[3])
 #   elif defined _MSC_VER
 #     include <intrin.h>
-#     define cpuid(regs, leaf, subleaf) __cpuidex(regs, leaf, subleaf)
+#     define cpuid(regs, leaf, subleaf) __cpuidex((int*)regs, leaf, subleaf)
 #   elif !defined cpuid
 #     warning "Runtime AVX-512 detection is only supported with GCC/Clang or "
               "MSVC CPUID intrinsics. For unsupported compilers, please pass " \
@@ -584,7 +584,7 @@ void ubc_check_avx512(const uint32_t W[80], uint32_t dvmask[1])
 				need for that, though.                      */
 				impossible.vector = _mm512_mask_or_epi32
 				                      (impossible.vector,
-				                       neq,
+				                       (__mmask16)neq,
 				                       impossible.vector,
 				                       ubc_dvss[i][j].vector);
 			/* Clang pulls `neq` into a GPR to do these shifts, and
@@ -633,10 +633,14 @@ static  implementation ubc_check_dispatched;
 static  int            avx512_supported(void);
 
 /* We'd like to use `_Atomic`, but that's C11 (unless we redefined it). */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
+#ifdef __GNUC__
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Wpedantic"
+#endif
 static implementation *_Atomic ubc_check_chosen = ubc_check_dispatched;
-#pragma GCC diagnostic pop
+#ifdef __GNUC__
+# pragma GCC diagnostic pop
+#endif
 /* On GNU/ELF platforms, we could just use `[[gnu::ifunc]]`, and that'd be
 marginally cheaper in the dynamic library case (just one indirect call, not
 two), but that's a portability mess.                                     */
