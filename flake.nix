@@ -44,15 +44,32 @@
           sha1collisiondetection,
           withSha1collisiondetection ? false,
           ...
-        }@args: old: old.overrideAttrs (
-          final: prev: let
-            flag     = withSha1collisiondetection;
-            maybeAdd = name: x: {
-              ${if prev ? ${name} || flag then name else null} =
-                prev.${name} or [ ] ++ lib.optional flag x;
-            };
-          in maybeAdd "buildInputs" sha1collisiondetection
-            // maybeAdd "makeFlags" "DC_SHA1_EXTERNAL=YesPlease"));
+        }@args: old:
+        assert lib.assertOneOf
+          "withSha1collisiondetection"
+          withSha1collisiondetection
+          [ false "internal" true "external" "from-source" ];
+        old.overrideAttrs (final: prev: let
+          choice =
+            if      withSha1collisiondetection == false then "internal"
+            else if withSha1collisiondetection == true  then "external"
+            else    withSha1collisiondetection;
+          when = when: x: if when then x else null;
+        in {
+          ${when (choice == "external") "buildInputs"} =
+            prev.buildInputs or [ ] ++ [ sha1collisiondetection ];
+          ${when (choice == "external") "makeFlags"} =
+            prev.makeFlags or [ ] ++ [ "DC_SHA1_EXTERNAL=YesPlease" ];
+
+          ${when (choice == "from-source") "sha1collisiondetection"} =
+            sha1collisiondetection.src.outPath;
+          ${when (choice == "from-source") "postUnpack"} =
+            prev.postUnpack or "" + ''
+              cp -Tr --no-preserve=mode -- "$sha1collisiondetection" "$sourceRoot/sha1collisiondetection"
+            '';
+          ${when (choice == "from-source") "makeFlags"} =
+            prev.makeFlags or [ ] ++ [ "DC_SHA1_SUBMODULE=YesPlease" ];
+        }));
     };
   } // forSystems lib.platforms.linux (system: self: let
     pkgs = import nixpkgs {
