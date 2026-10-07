@@ -26,7 +26,7 @@
     overlays.default = final: prev: {
       sha1collisiondetection = prev.sha1collisiondetection.overrideAttrs (final: prev: {
         __structuredAttrs = true;
-        version = "1.0.3-unstable-2026-10-04";
+        version = "1.0.3-unstable-2026-10-06";
         src = lib.fileset.toSource {
           root    = ./.;
           fileset = lib.fileset.unions [

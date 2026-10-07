@@ -61,61 +61,47 @@ are unlikely to figure out that it's good to unroll these loops on their own. */
 # endif
 #endif
 
-#ifndef SHA1DC_HAVE_STDATOMIC
-# if       defined __GNUC__                                       \
-        && (__GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ >= 9) \
-     ||    defined __clang__                                      \
-        && (  __clang_major__ > 3                                 \
-           || __clang_major__ == 3 && __clang_minor__ >= 2)       \
-     || defined __STDC_VERSION__ && __STDC_VERSION__ >= 201112L
-#   define SHA1DC_HAVE_STDATOMIC 1
-# else
-#   define SHA1DC_HAVE_STDATOMIC 0
-# endif
-#endif
-
 /* Compilers define __AVX512*__ when given e.g. `-mavx512f` etc. on the command
 line. They are a request from the user to use the instructions freely, without
-any runtime dispatch. SHA1DC_ALWAYS_AVX512 may also be set explicitly.       */
-#ifndef SHA1DC_ALWAYS_AVX512
-# if    defined __AVX512F__  && defined __AVX512BW__             \
-     && defined __AVX512VL__ && defined __AVX512VBMI__           \
-     && (!defined SHA1DC_ENABLE_AVX512 || SHA1DC_ENABLE_AVX512)
-#   define SHA1DC_ALWAYS_AVX512 1
-# else
-#   define SHA1DC_ALWAYS_AVX512 0
-# endif
+any runtime dispatch.                                                        */
+#if   defined __AVX512F__  && defined __AVX512BW__   \
+   && defined __AVX512VL__ && defined __AVX512VBMI__
+# define SHA1DC_AMBIENT_AVX512 1
+#else
+# define SHA1DC_AMBIENT_AVX512 0
 #endif
-#if SHA1DC_ALWAYS_AVX512 && !defined SHA1DC_ENABLE_AVX512
-# define SHA1DC_ENABLE_AVX512 1
+#ifdef SHA1DC_NO_STANDARD_INCLUDES
+  /* AVX-512 + no standard includes is unsupported (sorry). */
+# define SHA1DC_COULD_AVX512       0
+# define SHA1DC_COULD_X86_DISPATCH 0
+#elif defined __GNUC__  && defined __x86_64__ && __GNUC__        >= 7    \
+  ||  defined __clang__ && defined __x86_64__ && __clang_major__ >= 4    \
+  ||  defined _MSC_VER  && defined _M_X64     && _MSC_VER        >= 1924
+# define SHA1DC_COULD_AVX512       1
+# define SHA1DC_COULD_X86_DISPATCH 1
+#elif SHA1DC_AMBIENT_AVX512
+  /* We'll assume <immintrin.h> exists and contains what we need. */
+# define SHA1DC_COULD_AVX512       1
+  /* But we won't know how to use cpuid. */
+# define SHA1DC_COULD_X86_DISPATCH 0
+#else
+# define SHA1DC_COULD_AVX512       0
+# define SHA1DC_COULD_X86_DISPATCH 0
 #endif
 
-/* Should the AVX-512 code be built? */
+/* These two may be predefined during compilation for configuration. */
 #ifndef SHA1DC_ENABLE_AVX512
-# if    defined __GNUC__  && defined __x86_64__ && __GNUC__        >= 7     \
-     || defined __clang__ && defined __x86_64__ && __clang_major__ >= 4     \
-     || defined _MSC_VER  && defined _M_X64     && _MSC_VER        >= 1924
-#   define SHA1DC_ENABLE_AVX512 1
-# else
-#   define SHA1DC_ENABLE_AVX512 0
-# endif
+# define SHA1DC_ENABLE_AVX512 \
+   (   SHA1DC_COULD_AVX512                                   \
+    && (SHA1DC_COULD_X86_DISPATCH || SHA1DC_AMBIENT_AVX512))
 #endif
-/* Should the non-architecture-specific standard C code be built? */
 #ifndef SHA1DC_ENABLE_PORTABLE
-# if !SHA1DC_ALWAYS_AVX512
-#   define SHA1DC_ENABLE_PORTABLE 1
-# else
-#   define SHA1DC_ENABLE_PORTABLE 0
-# endif
+# define SHA1DC_ENABLE_PORTABLE \
+    (!SHA1DC_ENABLE_AVX512 || !SHA1DC_AMBIENT_AVX512)
 #endif
-/* Should ubc_check dispatch at runtime based on x86 processor features? */
-#ifndef SHA1DC_ENABLE_DISPATCH_X86
-# if SHA1DC_ENABLE_AVX512 && SHA1DC_ENABLE_PORTABLE
-#   define SHA1DC_ENABLE_DISPATCH_X86 1
-# else
-#   define SHA1DC_ENABLE_DISPATCH_X86 0
-# endif
-#endif
+
+#define SHA1DC_ENABLE_X86_DISPATCH \
+    (SHA1DC_ENABLE_AVX512 && SHA1DC_ENABLE_PORTABLE)
 
 #ifndef SHA1DC_NO_STANDARD_INCLUDES
 # include <stddef.h>
@@ -123,7 +109,7 @@ any runtime dispatch. SHA1DC_ALWAYS_AVX512 may also be set explicitly.       */
 # if SHA1DC_ENABLE_AVX512
 #   include <immintrin.h>
 # endif
-# if SHA1DC_ENABLE_DISPATCH_X86
+# if SHA1DC_ENABLE_X86_DISPATCH
 #   ifdef __GNUC__
 #     include <cpuid.h>
 #     define cpuid(regs, leaf, subleaf)                                   \
@@ -135,8 +121,8 @@ any runtime dispatch. SHA1DC_ALWAYS_AVX512 may also be set explicitly.       */
 #   elif !defined cpuid
 #     warning "Runtime AVX-512 detection is only supported with GCC/Clang or "
               "MSVC CPUID intrinsics. For unsupported compilers, please pass " \
-              "`-DSHA1DC_ENABLE_AVX512=0` or `-DSHA1DC_ALWAYS_AVX512=1`, or "  \
-              "define a `cpuid` macro yourself."
+              "`-DSHA1DC_ENABLE_AVX512=0` or `-DSHA1DC_ENABLE_PORTABLE=0`, "   \
+              "or define a `cpuid` macro yourself."
 #   endif
 #   ifdef __clang__
       /* Clang has a problem with its `<immintrin.h>`'s `_xgetbv`. */
@@ -148,7 +134,7 @@ any runtime dispatch. SHA1DC_ALWAYS_AVX512 may also be set explicitly.       */
 #   else
 #     define xgetbv(xcr) _xgetbv(xcr)
 #   endif
-#   if SHA1DC_HAVE_STDATOMIC
+#   if defined __STDC_VERSION__ && __STDC_VERSION__ >= 201112L
 #     include <stdatomic.h>
 #   else
       /* We just need (relaxed) atomic loads and stores (of pointers). On x86,
@@ -204,7 +190,7 @@ dv_info_t sha1_dvs[] =
 , {0,0,0,0,0,0, {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}}
 };
 
-#if SHA1DC_ENABLE_DISPATCH_X86
+#if SHA1DC_ENABLE_X86_DISPATCH
 # define SHA1DC_DISPATCHED static
 #else
 # define SHA1DC_DISPATCHED
@@ -265,7 +251,7 @@ void ubc_check_portable(const uint32_t W[80], uint32_t dvmask[1])
 	following code. While in some sense that is the "ideal" solution, it is
 	not portable, and not all compilers even support force-unrolling of
 	loops. So we unroll the loop by hand, and hardcode the UBC data into
-	this function.                                                        */
+	this function. The UBCs have also been reordered.                     */
 #define UBC(a, b, i, j, c, dvs) \
   do *dvmask = check_ubc(*dvmask, W[a], W[b], i, j, c, dvs); while(0)
 	UBC(44, 45, 29, 29, 0, 0x0283a080); UBC(43, 46,  4, 29, 0, 0x08080225);
@@ -699,7 +685,7 @@ void ubc_check_avx512(const uint32_t W[80], uint32_t dvmask[1])
 }
 #endif
 
-#if SHA1DC_ENABLE_DISPATCH_X86
+#if SHA1DC_ENABLE_X86_DISPATCH
 typedef void           implementation(const uint32_t[80], uint32_t[1]);
 static  implementation ubc_check_dispatched;
 static  int            avx512_supported(void);
